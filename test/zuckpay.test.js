@@ -106,7 +106,7 @@ describe('dados do doador', () => {
       email: 'maria@exemplo.com',
       telefone: '11987654321',
     });
-    const { erros } = validateDonor({ nome: 'Maria', cpf: '1', email: 'x', telefone: '123' });
+    const { erros } = validateDonor({ nome: 'Ma', cpf: '1', email: 'x', telefone: '123' });
     assert.deepEqual(Object.keys(erros).sort(), ['cpf', 'email', 'nome', 'telefone']);
   });
 });
@@ -247,6 +247,42 @@ describe('quadro de doações com ZuckPay', () => {
   });
 });
 
+describe('ZuckPay com pagador sem e-mail', () => {
+  it('cria a cobrança sem o campo email', async () => {
+    const fake = createFakeZuckPay();
+    const app = createApp({
+      ...loadConfig({}),
+      databaseUrl: '',
+      localDataDir: ':memory:',
+      zuckpay: {
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        webhookSecret: '',
+        payer: { ...PAGADOR, email: '' },
+      },
+      fetchImpl: fake.fetchImpl,
+    });
+    await app.ready();
+    await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${app.server.address().port}`;
+    try {
+      assert.equal((await (await fetch(`${url}/api/doacoes/config`)).json()).provedor, 'zuckpay');
+      const res = await fetch(`${url}/api/doacoes/pix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valor: 50 }),
+      });
+      assert.equal(res.status, 200);
+      const sent = JSON.parse(fake.calls.at(-1).init.body);
+      assert.equal('email' in sent, false);
+      assert.equal(sent.cpf, '52998224725');
+    } finally {
+      app.server.closeAllConnections();
+      await new Promise((resolve) => app.server.close(resolve));
+    }
+  });
+});
+
 describe('ZuckPay sem dados do pagador', () => {
   it('não cria cobranças e informa que o Pix está em configuração', async () => {
     const app = createApp({
@@ -262,6 +298,7 @@ describe('ZuckPay sem dados do pagador', () => {
     try {
       const cfg = await (await fetch(`${url}/api/doacoes/config`)).json();
       assert.equal(cfg.provedor, null);
+      assert.deepEqual(cfg.pendenciasZuckPay, ['ZUCKPAY_PAGADOR_NOME', 'ZUCKPAY_PAGADOR_CPF', 'ZUCKPAY_PAGADOR_TELEFONE']);
       const res = await fetch(`${url}/api/doacoes/pix`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

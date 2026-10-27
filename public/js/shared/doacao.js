@@ -23,9 +23,10 @@ export function isValidCpf(value) {
 
 /**
  * Valida e normaliza os dados do doador exigidos pelo processador de pagamentos.
+ * Com emailOptional, o e-mail pode ficar vazio (não é enviado à ZuckPay).
  * Retorna { dados } ou { erros: { campo: mensagem } }.
  */
-export function validateDonor(input = {}) {
+export function validateDonor(input = {}, { emailOptional = false } = {}) {
   const erros = {};
   const nome = String(input.nome ?? '').replace(/\s+/g, ' ').trim();
   const cpf = digits(input.cpf);
@@ -33,9 +34,10 @@ export function validateDonor(input = {}) {
   let telefone = digits(input.telefone);
   if (telefone.length === 13 && telefone.startsWith('55')) telefone = telefone.slice(2);
 
-  if (nome.length < 3 || nome.length > 120 || !/\s/.test(nome)) erros.nome = 'Informe seu nome completo.';
+  if (nome.length < 3 || nome.length > 120) erros.nome = 'Informe o nome.';
   if (!isValidCpf(cpf)) erros.cpf = 'CPF inválido.';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 160) erros.email = 'E-mail inválido.';
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 160;
+  if (!emailOk && !(emailOptional && email === '')) erros.email = 'E-mail inválido.';
   if (telefone.length < 10 || telefone.length > 11) erros.telefone = 'Informe o celular com DDD.';
 
   return Object.keys(erros).length ? { erros } : { dados: { nome, cpf, email, telefone } };

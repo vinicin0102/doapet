@@ -75,7 +75,7 @@ export function createZuckPayClient({ clientId, clientSecret, baseUrl = DEFAULT_
         body: {
           nome,
           cpf,
-          email,
+          ...(email ? { email } : {}),
           telefone,
           valor,
           descricao,

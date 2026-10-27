@@ -97,10 +97,15 @@ export function createApp(config) {
   // Dados fixos do pagador: sem eles (ou se inválidos) não é possível criar cobranças,
   // mas pagamentos já gerados continuam sendo confirmados.
   let zuckpayPayer = null;
+  // Variáveis que faltam ou estão inválidas (só os nomes, nunca os valores), para diagnóstico.
+  const zuckpayPending = [];
   if (config.zuckpay) {
-    const { dados, erros } = validateDonor(config.zuckpay.payer);
-    if (erros) console.error(`ZuckPay: dados do pagador inválidos (${Object.keys(erros).join(', ')}).`);
+    const { dados, erros } = validateDonor(config.zuckpay.payer, { emailOptional: true });
+    for (const campo of Object.keys(erros ?? {})) zuckpayPending.push(`ZUCKPAY_PAGADOR_${campo.toUpperCase()}`);
+    if (erros) console.error(`ZuckPay: dados do pagador inválidos (${zuckpayPending.join(', ')}).`);
     zuckpayPayer = dados ?? null;
+  } else {
+    zuckpayPending.push('ZUCKPAY_CLIENT_ID', 'ZUCKPAY_CLIENT_SECRET');
   }
   const canCreateZuckPay = Boolean(zuckpay && zuckpayPayer);
   let initPromise = null;
@@ -158,6 +163,7 @@ export function createApp(config) {
         provedor: canCreateZuckPay ? 'zuckpay' : config.pixReceiver ? 'pix' : null,
         valores: DONATION_PRESETS,
         maisEscolhido: MOST_CHOSEN,
+        ...(canCreateZuckPay ? {} : { pendenciasZuckPay: zuckpayPending }),
       });
     }
 

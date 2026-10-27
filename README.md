@@ -75,7 +75,7 @@ Variáveis:
 |---|---|
 | `ZUCKPAY_CLIENT_ID` e `ZUCKPAY_CLIENT_SECRET` | Painel ZuckPay → Desenvolvedores → Credenciais API |
 | `ZUCKPAY_WEBHOOK_SECRET` | Painel ZuckPay → `keys.php` → card "Webhook Secret" |
-| `ZUCKPAY_PAGADOR_NOME`, `ZUCKPAY_PAGADOR_CPF`, `ZUCKPAY_PAGADOR_EMAIL`, `ZUCKPAY_PAGADOR_TELEFONE` | Dados fixos do pagador usados em todas as cobranças. O CPF precisa ser válido. Sem eles, o quadro informa que o Pix está em configuração |
+| `ZUCKPAY_PAGADOR_NOME`, `ZUCKPAY_PAGADOR_CPF`, `ZUCKPAY_PAGADOR_EMAIL`, `ZUCKPAY_PAGADOR_TELEFONE` | Dados fixos do pagador usados em todas as cobranças. O CPF precisa ser válido e o e-mail é opcional (se vazio, não é enviado). Sem eles, o quadro informa que o Pix está em configuração |
 | `SITE_URL` (opcional) | Endereço público do site. Na Vercel é detectado automaticamente |
 
 Observações:

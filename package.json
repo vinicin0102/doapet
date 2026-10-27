@@ -1,0 +1,16 @@
+{
+  "name": "doapet",
+  "version": "1.0.0",
+  "description": "Site da ONG com barra de progresso editável da campanha de arrecadação",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "SECURE_COOKIES=false node --disable-warning=ExperimentalWarning --watch server.js",
+    "criar-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+  }
+}

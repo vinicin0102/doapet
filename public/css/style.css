@@ -1,0 +1,144 @@
+:root {
+  --cor-primaria: #e8833a;
+  --cor-primaria-escura: #c96a24;
+  --cor-fundo: #fffaf5;
+  --cor-texto: #2b2420;
+  --cor-texto-suave: #6b5d54;
+  --cor-borda: #eadfd5;
+  --raio: 14px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--cor-fundo);
+  color: var(--cor-texto);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+}
+
+.container {
+  width: min(1080px, 100% - 2rem);
+  margin-inline: auto;
+}
+
+.estreito {
+  max-width: 720px;
+}
+
+.topo {
+  border-bottom: 1px solid var(--cor-borda);
+  background: #fff;
+}
+
+.topo__conteudo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1rem;
+}
+
+.marca {
+  color: var(--cor-texto);
+  font-size: 1.35rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.menu {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.menu a {
+  color: var(--cor-texto-suave);
+  text-decoration: none;
+}
+
+.menu a:hover {
+  color: var(--cor-primaria-escura);
+}
+
+.hero {
+  padding: 4rem 0 3rem;
+  background: linear-gradient(180deg, #fff1e4, var(--cor-fundo));
+  text-align: center;
+}
+
+.hero h1 {
+  margin: 0 0 1rem;
+  font-size: clamp(2rem, 5vw, 3rem);
+  line-height: 1.15;
+}
+
+.hero__texto {
+  max-width: 640px;
+  margin: 0 auto 2rem;
+  color: var(--cor-texto-suave);
+  font-size: 1.15rem;
+}
+
+.botao {
+  display: inline-block;
+  padding: 0.85rem 1.75rem;
+  border-radius: 999px;
+  background: var(--cor-primaria);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.botao:hover {
+  background: var(--cor-primaria-escura);
+}
+
+.secao {
+  padding: 3rem 0;
+}
+
+.secao--clara {
+  background: #fff;
+}
+
+.secao__titulo {
+  margin: 0 0 1.5rem;
+  font-size: 1.75rem;
+  text-align: center;
+}
+
+.cartao {
+  max-width: 720px;
+  margin-inline: auto;
+  padding: 2rem;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  background: #fff;
+  box-shadow: 0 10px 30px rgb(120 70 30 / 8%);
+}
+
+.carregando {
+  color: var(--cor-texto-suave);
+  text-align: center;
+}
+
+.rodape {
+  padding: 2rem 0;
+  color: var(--cor-texto-suave);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .cartao {
+    padding: 1.25rem;
+  }
+  .menu {
+    gap: 0.75rem;
+  }
+}

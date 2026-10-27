@@ -1,0 +1,289 @@
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as auth from './auth.js';
+import * as campaign from './campaign.js';
+import { openDatabase } from './db.js';
+import { ProgressBroadcaster } from './events.js';
+import { MoneyError } from './money.js';
+import { normalizePixPayload, verifySignature } from './pix.js';
+
+const { HttpError } = campaign;
+const MAX_BODY_BYTES = 64 * 1024;
+const MAX_SSE_CLIENTS = 1000;
+const SESSION_COOKIE = 'doapet_admin';
+const SHARED_MODULES = {
+  '/js/shared/money.js': fileURLToPath(new URL('./money.js', import.meta.url)),
+  '/js/shared/progress.js': fileURLToPath(new URL('./progress.js', import.meta.url)),
+};
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+};
+
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+  'Content-Security-Policy':
+    "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; " +
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+};
+
+function sendJson(res, status, data, headers = {}) {
+  const body = JSON.stringify(data);
+  res.writeHead(status, {
+    ...SECURITY_HEADERS,
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    ...headers,
+  });
+  res.end(body);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new HttpError(413, 'Requisição muito grande.'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function parseJson(raw) {
+  if (raw.length === 0) return {};
+  try {
+    return JSON.parse(raw.toString('utf8'));
+  } catch {
+    throw new HttpError(400, 'JSON inválido.');
+  }
+}
+
+async function readJson(req) {
+  if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+    throw new HttpError(415, 'Envie os dados como JSON.');
+  }
+  return parseJson(await readBody(req));
+}
+
+function parseCookies(header = '') {
+  const out = {};
+  for (const part of header.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+
+export function createApp(config) {
+  const db = openDatabase(config.dbPath);
+  campaign.ensureCampaign(db, config.initialGoal);
+  if (config.bootstrapAdmin && auth.countAdmins(db) === 0) {
+    auth.createAdmin(db, config.bootstrapAdmin.username, config.bootstrapAdmin.password);
+    console.log(`Administrador inicial "${config.bootstrapAdmin.username}" criado.`);
+  }
+
+  const broadcaster = new ProgressBroadcaster();
+  const loginLimiter = new auth.LoginRateLimiter();
+  const publish = () => broadcaster.publish(campaign.getPublicSummary(db));
+
+  const clientIp = (req) =>
+    (config.trustProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) ||
+    req.socket.remoteAddress;
+
+  const sessionCookie = (value, maxAgeSeconds) =>
+    `${SESSION_COOKIE}=${value}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}` +
+    (config.secureCookies ? '; Secure' : '');
+
+  /** Exige sessão válida; para métodos que alteram dados, exige também o token CSRF. */
+  function requireAdmin(req) {
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    const session = auth.getSession(db, token);
+    if (!session) throw new HttpError(401, 'Faça login como administrador.');
+    if (req.method !== 'GET' && !auth.csrfMatches(session.csrfToken, req.headers['x-csrf-token'])) {
+      throw new HttpError(403, 'Token de segurança inválido. Recarregue o painel.');
+    }
+    return session;
+  }
+
+  async function handleApi(req, res, url) {
+    const route = `${req.method} ${url.pathname}`;
+
+    // ---------- Público (somente leitura) ----------
+    if (route === 'GET /api/campanha') {
+      return sendJson(res, 200, campaign.getPublicSummary(db), { 'Access-Control-Allow-Origin': '*' });
+    }
+    if (route === 'GET /api/campanha/eventos') {
+      if (broadcaster.clients.size >= MAX_SSE_CLIENTS) throw new HttpError(503, 'Tente novamente mais tarde.');
+      return broadcaster.subscribe(req, res, campaign.getPublicSummary(db));
+    }
+
+    // ---------- Webhook do provedor Pix ----------
+    if (route === 'POST /api/pix/webhook') {
+      if (!config.pixWebhookSecret) throw new HttpError(503, 'Webhook Pix não configurado.');
+      const raw = await readBody(req);
+      if (!verifySignature(raw, req.headers['x-pix-signature'], config.pixWebhookSecret)) {
+        throw new HttpError(401, 'Assinatura inválida.');
+      }
+      let events;
+      try {
+        events = normalizePixPayload(parseJson(raw));
+      } catch (err) {
+        if (err instanceof MoneyError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      let changed = false;
+      for (const event of events) changed = campaign.recordPixEvent(db, event) || changed;
+      if (changed) publish();
+      return sendJson(res, 200, { ok: true, processados: events.length });
+    }
+
+    // ---------- Autenticação ----------
+    if (route === 'POST /api/admin/login') {
+      const ip = clientIp(req);
+      if (loginLimiter.isBlocked(ip)) {
+        throw new HttpError(429, 'Muitas tentativas de login. Aguarde 15 minutos.');
+      }
+      const body = await readJson(req);
+      const admin = auth.authenticate(db, body.usuario, body.senha);
+      if (!admin) {
+        loginLimiter.recordFailure(ip);
+        throw new HttpError(401, 'Usuário ou senha incorretos.');
+      }
+      loginLimiter.reset(ip);
+      const session = auth.createSession(db, admin.id, config.sessionHours);
+      return sendJson(
+        res,
+        200,
+        { usuario: admin.username, csrfToken: session.csrfToken },
+        { 'Set-Cookie': sessionCookie(session.token, config.sessionHours * 3600) },
+      );
+    }
+    if (route === 'POST /api/admin/logout') {
+      requireAdmin(req);
+      auth.destroySession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+      return sendJson(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0) });
+    }
+    if (route === 'GET /api/admin/sessao') {
+      const session = requireAdmin(req);
+      return sendJson(res, 200, { usuario: session.username, csrfToken: session.csrfToken });
+    }
+
+    // ---------- Gerenciar Meta da Campanha ----------
+    if (route === 'GET /api/admin/campanha') {
+      requireAdmin(req);
+      return sendJson(res, 200, campaign.getAdminState(db));
+    }
+    if (route === 'PUT /api/admin/campanha') {
+      const session = requireAdmin(req);
+      const result = campaign.updateCampaign(db, session.username, await readJson(req));
+      if (result.alterado) publish();
+      return sendJson(res, 200, { ...result, estado: campaign.getAdminState(db) });
+    }
+    if (route === 'POST /api/admin/contribuicoes') {
+      const session = requireAdmin(req);
+      const result = campaign.addExternalContribution(db, session.username, await readJson(req));
+      publish();
+      return sendJson(res, 201, { ...result, estado: campaign.getAdminState(db) });
+    }
+    const removeMatch = /^\/api\/admin\/contribuicoes\/(\d+)$/.exec(url.pathname);
+    if (req.method === 'DELETE' && removeMatch) {
+      const session = requireAdmin(req);
+      campaign.removeExternalContribution(db, session.username, Number(removeMatch[1]), await readJson(req));
+      publish();
+      return sendJson(res, 200, { estado: campaign.getAdminState(db) });
+    }
+    if (route === 'GET /api/admin/historico') {
+      requireAdmin(req);
+      return sendJson(res, 200, campaign.listHistory(db, 500));
+    }
+
+    throw new HttpError(404, 'Rota não encontrada.');
+  }
+
+  function serveStatic(req, res, url) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, SECURITY_HEADERS).end();
+      return;
+    }
+    let pathname;
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      res.writeHead(400, SECURITY_HEADERS).end();
+      return;
+    }
+    if (pathname.endsWith('/')) pathname += 'index.html';
+    // Módulos compartilhados com o navegador: o painel usa exatamente as mesmas
+    // regras de validação e cálculo do servidor.
+    const file = SHARED_MODULES[pathname] ?? path.resolve(config.publicDir, `.${pathname}`);
+    if (!SHARED_MODULES[pathname] && !file.startsWith(config.publicDir + path.sep)) {
+      res.writeHead(403, SECURITY_HEADERS).end();
+      return;
+    }
+    fs.stat(file, (err, stat) => {
+      if (err || !stat.isFile()) {
+        // "/admin" sem barra final → redireciona para "/admin/".
+        if (!err && stat.isDirectory()) {
+          res.writeHead(301, { ...SECURITY_HEADERS, Location: `${url.pathname}/` }).end();
+          return;
+        }
+        res.writeHead(404, { ...SECURITY_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Página não encontrada.');
+        return;
+      }
+      const ext = path.extname(file);
+      const headers = {
+        ...SECURITY_HEADERS,
+        'Content-Type': MIME[ext] ?? 'application/octet-stream',
+        'Content-Length': stat.size,
+        // HTML/JS/CSS sempre revalidados: mudanças aparecem sem limpar cache.
+        'Cache-Control': 'no-cache',
+      };
+      // O script do widget pode ser incorporado em outro site da ONG.
+      if (pathname === '/js/barra-meta.js') headers['Access-Control-Allow-Origin'] = '*';
+      res.writeHead(200, headers);
+      if (req.method === 'HEAD') res.end();
+      else fs.createReadStream(file).pipe(res);
+    });
+  }
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    try {
+      if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
+      else serveStatic(req, res, url);
+    } catch (err) {
+      if (err instanceof HttpError) {
+        sendJson(res, err.status, { erro: err.message, ...err.extra });
+      } else {
+        console.error(err);
+        sendJson(res, 500, { erro: 'Erro interno. Tente novamente.' });
+      }
+    }
+  });
+
+  server.on('close', () => {
+    broadcaster.close();
+    db.close();
+  });
+
+  return { server, db };
+}

@@ -9,7 +9,8 @@ import { extractWebhookIds, mapZuckPayStatus, verifyZuckPaySignature } from '../
 const WEBHOOK_SECRET = 'whsec_teste';
 const CLIENT_ID = 'cid_teste';
 const CLIENT_SECRET = 'csec_teste';
-const DOADOR = { nome: 'Maria da Silva', cpf: '529.982.247-25', email: 'maria@exemplo.com', telefone: '(11) 98765-4321' };
+// Dados fixos do pagador, configurados pela ONG e usados em todas as cobranças.
+const PAGADOR = { nome: 'Maria da Silva', cpf: '529.982.247-25', email: 'maria@exemplo.com', telefone: '(11) 98765-4321' };
 
 /** Simulador da API ZuckPay v3 (somente o que o site usa). */
 function createFakeZuckPay() {
@@ -54,6 +55,7 @@ before(async () => {
       clientSecret: CLIENT_SECRET,
       webhookSecret: WEBHOOK_SECRET,
       baseUrl: 'https://www.zuckpay.com.br/conta',
+      payer: PAGADOR,
     },
     fetchImpl: zuck.fetchImpl,
   });
@@ -87,7 +89,7 @@ function sendWebhook(payload, { secret = WEBHOOK_SECRET, ts = Math.floor(Date.no
 }
 
 const raised = async () => (await call('GET', '/api/campanha')).data.arrecadado;
-const donate = (valor, extra = {}) => call('POST', '/api/doacoes/pix', { body: { valor, ...DOADOR, ...extra } });
+const donate = (valor) => call('POST', '/api/doacoes/pix', { body: { valor } });
 
 describe('dados do doador', () => {
   it('valida CPF pelos dígitos verificadores', () => {
@@ -98,7 +100,7 @@ describe('dados do doador', () => {
   });
 
   it('normaliza os dados e aponta os campos inválidos', () => {
-    assert.deepEqual(validateDonor(DOADOR).dados, {
+    assert.deepEqual(validateDonor(PAGADOR).dados, {
       nome: 'Maria da Silva',
       cpf: '52998224725',
       email: 'maria@exemplo.com',
@@ -149,22 +151,19 @@ describe('quadro de doações com ZuckPay', () => {
     assert.equal(res.data.maisEscolhido, 50);
   });
 
-  it('exige dados válidos do doador antes de chamar a ZuckPay', async () => {
+  it('recusa valores fora do quadro sem chamar a ZuckPay', async () => {
     const before = zuck.calls.length;
-    const res = await call('POST', '/api/doacoes/pix', { body: { valor: 50, ...DOADOR, cpf: '111.111.111-11' } });
-    assert.equal(res.status, 400);
-    assert.ok(res.data.campos.cpf);
     assert.equal((await donate(7)).status, 400);
     assert.equal(zuck.calls.length, before);
   });
 
-  it('cria a cobrança com external_id_client, urlnoty e autenticação Basic', async () => {
+  it('cria a cobrança só com o valor, usando os dados fixos do pagador', async () => {
     const res = await donate(50);
     assert.equal(res.status, 200);
     donation = res.data;
     assert.match(donation.id, /^DOAPET[A-Z0-9]{19}$/);
     assert.match(donation.copiaECola, /^00020126PIXFAKE/);
-    assert.match(donation.qrCode, /^data:image\/png;base64,/);
+    assert.equal(donation.qrCode, undefined); // somente o código para copiar
 
     const sent = JSON.parse(zuck.calls.at(-1).init.body);
     assert.deepEqual(sent, {
@@ -245,5 +244,33 @@ describe('quadro de doações com ZuckPay', () => {
     const res = await sendWebhook({ external_id_client: donation.id });
     assert.equal(res.data.status, 'devolvida');
     assert.equal(await raised(), 25);
+  });
+});
+
+describe('ZuckPay sem dados do pagador', () => {
+  it('não cria cobranças e informa que o Pix está em configuração', async () => {
+    const app = createApp({
+      ...loadConfig({}),
+      databaseUrl: '',
+      localDataDir: ':memory:',
+      zuckpay: { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, webhookSecret: '', payer: { nome: '', cpf: '', email: '', telefone: '' } },
+      fetchImpl: zuck.fetchImpl,
+    });
+    await app.ready();
+    await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${app.server.address().port}`;
+    try {
+      const cfg = await (await fetch(`${url}/api/doacoes/config`)).json();
+      assert.equal(cfg.provedor, null);
+      const res = await fetch(`${url}/api/doacoes/pix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valor: 50 }),
+      });
+      assert.equal(res.status, 503);
+    } finally {
+      app.server.closeAllConnections();
+      await new Promise((resolve) => app.server.close(resolve));
+    }
   });
 });

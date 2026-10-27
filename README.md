@@ -60,9 +60,9 @@ Logo abaixo da barra, a seção **"Faça sua doação"** oferece os valores **R$
 
 Com as credenciais da ZuckPay configuradas:
 
-1. O doador escolhe o valor e informa nome, CPF, e-mail e celular. São campos obrigatórios da API da ZuckPay: os dados vão só para a ZuckPay e não são guardados no site.
-2. O site cria a cobrança (`POST /v3/pix/qrcode`) com um `external_id_client` único (`DOAPET…`). Ele serve de chave de idempotência e de identificação da doação.
-3. A página mostra o QR Code e o Pix Copia e Cola, depois acompanha o pagamento.
+1. O doador só escolhe o valor e clica em "Doar". Ele não preenche nenhum dado.
+2. O site cria a cobrança (`POST /v3/pix/qrcode`) com um `external_id_client` único (`DOAPET…`), que serve de chave de idempotência e de identificação da doação. Os campos de pagador exigidos pela API (nome, CPF, e-mail e telefone) vêm dos dados fixos configurados em `ZUCKPAY_PAGADOR_*` e são iguais para todas as cobranças.
+3. A página mostra somente o código Pix Copia e Cola, com o botão "Copiar código Pix", e acompanha o pagamento.
 4. A confirmação chega de dois jeitos, e qualquer um basta:
    - **Postback** da ZuckPay em `/api/zuckpay/webhook` (enviado para a `urlnoty` da cobrança). A assinatura `X-ZuckPay-Signature` é validada quando `ZUCKPAY_WEBHOOK_SECRET` está definido, com tolerância de 5 minutos.
    - **Consulta de status** feita enquanto a página do doador está aberta.
@@ -75,6 +75,7 @@ Variáveis:
 |---|---|
 | `ZUCKPAY_CLIENT_ID` e `ZUCKPAY_CLIENT_SECRET` | Painel ZuckPay → Desenvolvedores → Credenciais API |
 | `ZUCKPAY_WEBHOOK_SECRET` | Painel ZuckPay → `keys.php` → card "Webhook Secret" |
+| `ZUCKPAY_PAGADOR_NOME`, `ZUCKPAY_PAGADOR_CPF`, `ZUCKPAY_PAGADOR_EMAIL`, `ZUCKPAY_PAGADOR_TELEFONE` | Dados fixos do pagador usados em todas as cobranças. O CPF precisa ser válido. Sem eles, o quadro informa que o Pix está em configuração |
 | `SITE_URL` (opcional) | Endereço público do site. Na Vercel é detectado automaticamente |
 
 Observações:
@@ -163,7 +164,7 @@ src/auth.js             administradores, senhas, sessões, limite de login
 src/db.js               esquema e conexão PostgreSQL (pg em produção, PGlite local)
 public/index.html       página inicial da ONG
 public/js/barra-meta.js widget da barra de progresso
-public/js/doacao.js     quadro de doações (valores pré-definidos, QR Code e Copia e Cola)
+public/js/doacao.js     quadro de doações (valores pré-definidos e código Pix Copia e Cola)
 public/js/shared/       cálculo do progresso, validação de valores e valores de doação (servidor e navegador)
 vercel.json             cabeçalhos de segurança na Vercel
 public/admin/           painel administrativo

@@ -30,6 +30,14 @@ export function loadConfig(env = process.env) {
             clientSecret: env.ZUCKPAY_CLIENT_SECRET.trim(),
             webhookSecret: (env.ZUCKPAY_WEBHOOK_SECRET || '').trim(),
             baseUrl: env.ZUCKPAY_BASE_URL || undefined,
+            // Dados fixos do pagador usados em TODAS as cobranças (a API exige nome,
+            // CPF, e-mail e telefone; o doador não precisa informar nada).
+            payer: {
+              nome: env.ZUCKPAY_PAGADOR_NOME || '',
+              cpf: env.ZUCKPAY_PAGADOR_CPF || '',
+              email: env.ZUCKPAY_PAGADOR_EMAIL || '',
+              telefone: env.ZUCKPAY_PAGADOR_TELEFONE || '',
+            },
           }
         : null,
     // Endereço público do site (para a ZuckPay avisar os pagamentos). Na Vercel é detectado sozinho.

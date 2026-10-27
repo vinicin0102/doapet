@@ -4,7 +4,6 @@ import path from 'node:path';
 import * as auth from './auth.js';
 import * as campaign from './campaign.js';
 import { openDatabase } from './db.js';
-import QRCode from 'qrcode';
 import { DONATION_PRESETS, MOST_CHOSEN, validateDonor } from '../public/js/shared/doacao.js';
 import { MoneyError } from '../public/js/shared/money.js';
 import { PixConfigError, buildPixPayload, newTxid } from './brcode.js';
@@ -95,6 +94,15 @@ export function createApp(config) {
   let loginLimiter = null;
   let pixLimiter = null;
   const zuckpay = config.zuckpay ? createZuckPayClient({ ...config.zuckpay, fetchImpl: config.fetchImpl }) : null;
+  // Dados fixos do pagador: sem eles (ou se inválidos) não é possível criar cobranças,
+  // mas pagamentos já gerados continuam sendo confirmados.
+  let zuckpayPayer = null;
+  if (config.zuckpay) {
+    const { dados, erros } = validateDonor(config.zuckpay.payer);
+    if (erros) console.error(`ZuckPay: dados do pagador inválidos (${Object.keys(erros).join(', ')}).`);
+    zuckpayPayer = dados ?? null;
+  }
+  const canCreateZuckPay = Boolean(zuckpay && zuckpayPayer);
   let initPromise = null;
 
   // Inicialização preguiçosa: conecta ao banco e cria o esquema na primeira requisição
@@ -146,8 +154,8 @@ export function createApp(config) {
     // ---------- Quadro de doações ----------
     if (route === 'GET /api/doacoes/config') {
       return sendJson(res, 200, {
-        // "zuckpay": cobrança pelo processador (pede dados do doador); "pix": Pix estático; null: indisponível.
-        provedor: zuckpay ? 'zuckpay' : config.pixReceiver ? 'pix' : null,
+        // "zuckpay": cobrança pelo processador; "pix": Pix estático; null: indisponível.
+        provedor: canCreateZuckPay ? 'zuckpay' : config.pixReceiver ? 'pix' : null,
         valores: DONATION_PRESETS,
         maisEscolhido: MOST_CHOSEN,
       });
@@ -157,7 +165,7 @@ export function createApp(config) {
       const body = await readJson(req);
       const valor = Number(body.valor);
       if (!DONATION_PRESETS.includes(valor)) throw new HttpError(400, 'Escolha um dos valores disponíveis.');
-      if (zuckpay) return createZuckPayDonation(req, res, valor, body);
+      if (canCreateZuckPay) return createZuckPayDonation(req, res, valor);
       if (!config.pixReceiver) {
         throw new HttpError(503, 'As doações via Pix estão em configuração. Volte em breve!', {
           codigo: 'PIX_NAO_CONFIGURADO',
@@ -178,7 +186,7 @@ export function createApp(config) {
           codigo: 'PIX_NAO_CONFIGURADO',
         });
       }
-      return sendJson(res, 200, { valor, copiaECola, qrCode: await qrDataUrl(copiaECola) });
+      return sendJson(res, 200, { valor, copiaECola });
     }
 
     // Demais rotas dependem do banco de dados.
@@ -293,11 +301,7 @@ export function createApp(config) {
     throw new HttpError(404, 'Rota não encontrada.');
   }
 
-  const qrDataUrl = (text) => QRCode.toDataURL(text, { errorCorrectionLevel: 'M', margin: 1, width: 280 });
-
-  async function createZuckPayDonation(req, res, valor, body) {
-    const { dados, erros } = validateDonor(body);
-    if (erros) throw new HttpError(400, Object.values(erros)[0], { campos: erros });
+  async function createZuckPayDonation(req, res, valor) {
     await ready();
     const key = `pix:${clientIp(req)}`;
     if (await pixLimiter.isBlocked(key)) {
@@ -308,7 +312,7 @@ export function createApp(config) {
     try {
       charge = await donations.createDonationCharge(db, zuckpay, {
         valor,
-        doador: dados,
+        doador: zuckpayPayer,
         urlnoty: config.siteUrl.startsWith('https://') ? `${config.siteUrl}/api/zuckpay/webhook` : undefined,
       });
     } catch (err) {
@@ -319,7 +323,6 @@ export function createApp(config) {
       valor,
       id: charge.id,
       copiaECola: charge.copiaECola,
-      qrCode: await qrDataUrl(charge.copiaECola),
     });
   }
 

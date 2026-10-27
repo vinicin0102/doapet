@@ -252,7 +252,7 @@ describe('API da campanha', () => {
       assert.equal(res.status, 200);
       assert.equal(res.data.valor, valor);
       assert.ok(res.data.copiaECola.includes(`54${String((valor).toFixed(2).length).padStart(2, '0')}${valor.toFixed(2)}`));
-      assert.match(res.data.qrCode, /^data:image\/png;base64,/);
+      assert.equal(res.data.qrCode, undefined); // somente o código para copiar
     }
     for (const valor of [0, -50, 7, 1000, '50; DROP', null]) {
       const res = await request('POST', '/api/doacoes/pix', { body: { valor } });

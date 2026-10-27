@@ -1,16 +1,14 @@
 // Quadro de doações com valores pré-definidos. Ao escolher um valor, o servidor
-// gera o QR Code e o "Pix Copia e Cola" com o valor já preenchido. Com a ZuckPay,
+// gera o código "Pix Copia e Cola" com o valor já preenchido. Com a ZuckPay,
 // a página acompanha o pagamento e avisa quando ele é confirmado.
-import { DONATION_PRESETS, MOST_CHOSEN, validateDonor } from './shared/doacao.js';
+import { DONATION_PRESETS, MOST_CHOSEN } from './shared/doacao.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('form-doacao');
 const grid = $('opcoes-doacao');
-const donorBox = $('dados-doador');
 const button = $('botao-doar');
 const message = $('mensagem-doacao');
 const payment = $('pagamento-pix');
-const qr = $('qr-pix');
 const code = $('copia-cola');
 const copyButton = $('botao-copiar');
 const paymentTitle = $('titulo-pagamento');
@@ -23,7 +21,6 @@ const POLL_TIMEOUT_MS = 30 * 60_000;
 const brl = (reais) => reais.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const brlShort = (reais) => `R$ ${reais.toLocaleString('pt-BR')}`;
 
-let provider = null; // 'zuckpay' | 'pix' | null
 let pollTimer = null;
 
 function el(tag, className, text) {
@@ -62,16 +59,6 @@ function setMessage(text, type = '') {
   message.className = `mensagem-doacao${type ? ` mensagem-doacao--${type}` : ''}`;
 }
 
-function showFieldErrors(errors = {}) {
-  for (const small of donorBox.querySelectorAll('[data-erro]')) {
-    const field = small.dataset.erro;
-    small.textContent = errors[field] ?? '';
-    form.elements[field].setAttribute('aria-invalid', errors[field] ? 'true' : 'false');
-  }
-  const first = Object.keys(errors)[0];
-  if (first) form.elements[first].focus();
-}
-
 function stopPolling() {
   clearTimeout(pollTimer);
   pollTimer = null;
@@ -84,29 +71,7 @@ function resetPayment() {
   paymentStatus.hidden = true;
 }
 
-// Máscaras simples para CPF e celular enquanto o doador digita.
-function mask(input, format) {
-  input.addEventListener('input', () => {
-    input.value = format(input.value.replace(/\D+/g, ''));
-  });
-}
-mask(form.elements.cpf, (d) =>
-  d
-    .slice(0, 11)
-    .replace(/^(\d{3})(\d)/, '$1.$2')
-    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
-    .replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2'),
-);
-mask(form.elements.telefone, (d) => {
-  d = d.slice(0, 11);
-  if (d.length <= 2) return d;
-  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
-  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
-  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-});
-
-form.addEventListener('change', (e) => {
-  if (e.target.name !== 'valor') return;
+form.addEventListener('change', () => {
   updateButton();
   // Trocar de valor esconde o Pix anterior para não pagar o valor errado.
   resetPayment();
@@ -143,24 +108,6 @@ function pollStatus(id, valor, startedAt = Date.now()) {
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const valor = selectedValue();
-  const body = { valor };
-
-  if (provider === 'zuckpay') {
-    const donor = {
-      nome: form.elements.nome.value,
-      cpf: form.elements.cpf.value,
-      email: form.elements.email.value,
-      telefone: form.elements.telefone.value,
-    };
-    const { erros } = validateDonor(donor);
-    showFieldErrors(erros);
-    if (erros) {
-      setMessage('Confira os dados destacados.', 'erro');
-      return;
-    }
-    Object.assign(body, donor);
-  }
-
   resetPayment();
   button.disabled = true;
   setMessage('Gerando seu Pix…');
@@ -168,15 +115,11 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/api/doacoes/pix', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ valor }),
       cache: 'no-store',
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (data.campos) showFieldErrors(data.campos);
-      throw new Error(data.erro || 'Não foi possível gerar o Pix agora. Tente novamente.');
-    }
-    qr.src = data.qrCode;
+    if (!res.ok) throw new Error(data.erro || 'Não foi possível gerar o Pix agora. Tente novamente.');
     code.value = data.copiaECola;
     paymentTitle.textContent = `Pix de ${brl(data.valor)}`;
     payment.hidden = false;
@@ -212,11 +155,3 @@ $('botao-nova-doacao').addEventListener('click', () => {
 renderOptions();
 updateButton();
 
-// Descobre se as doações passam pela ZuckPay (que pede os dados do doador).
-fetch('/api/doacoes/config', { cache: 'no-store' })
-  .then((r) => r.json())
-  .then((cfg) => {
-    provider = cfg.provedor;
-    donorBox.hidden = provider !== 'zuckpay';
-  })
-  .catch(() => {});

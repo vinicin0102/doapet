@@ -280,14 +280,6 @@ body {
   margin: 0;
 }
 
-.pagamento-pix img {
-  width: 240px;
-  height: 240px;
-  border: 1px solid var(--cor-borda);
-  border-radius: 12px;
-  background: #fff;
-}
-
 .pagamento-pix textarea {
   width: 100%;
   padding: 0.6rem 0.75rem;
@@ -303,70 +295,6 @@ body {
 .pagamento-pix__nota {
   color: var(--cor-texto-suave);
   font-size: 0.92rem;
-}
-
-.dados-doador {
-  margin: 0 0 1.25rem;
-}
-
-.dados-doador[hidden] {
-  display: none;
-}
-
-.dados-doador__aviso {
-  margin: 0 0 0.75rem;
-  font-weight: 600;
-}
-
-.dados-doador__grade {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem 1rem;
-}
-
-.campo-doacao {
-  display: grid;
-  gap: 0.3rem;
-}
-
-.campo-doacao--largo {
-  grid-column: 1 / -1;
-}
-
-.campo-doacao > span {
-  font-size: 0.92rem;
-  font-weight: 600;
-}
-
-.campo-doacao input {
-  width: 100%;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--cor-borda);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--cor-texto);
-  font: inherit;
-}
-
-.campo-doacao input:focus {
-  border-color: var(--cor-primaria);
-  outline: 2px solid rgb(232 131 58 / 25%);
-}
-
-.campo-doacao input[aria-invalid='true'] {
-  border-color: #b42318;
-}
-
-.erro-campo {
-  min-height: 1em;
-  color: #b42318;
-  font-size: 0.82rem;
-}
-
-.dados-doador__privacidade {
-  margin: 0.75rem 0 0;
-  color: var(--cor-texto-suave);
-  font-size: 0.85rem;
 }
 
 .pagamento-pix__status {
@@ -439,9 +367,6 @@ body {
   .valores-doacao__grade {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     row-gap: 1rem;
-  }
-  .dados-doador__grade {
-    grid-template-columns: 1fr;
   }
 
   .cartao {

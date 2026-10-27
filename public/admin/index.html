@@ -202,6 +202,44 @@
           </div>
         </section>
 
+        <section class="cartao" id="secao-midias">
+          <h2>Imagens e vídeos da página</h2>
+          <p class="ajuda">
+            Envie fotos e vídeos e escolha onde cada um aparece na página inicial. Imagens: JPG, PNG, WEBP ou GIF
+            (até 15 MB). Vídeos: MP4, WEBM ou MOV (até 200 MB).
+          </p>
+          <p class="aviso" id="aviso-midias" hidden>
+            O armazenamento de arquivos (Vercel Blob) ainda não está configurado, então o envio está desativado.
+          </p>
+          <form id="form-midia" class="linha-form" novalidate>
+            <label class="campo campo--largo">
+              <span>Arquivo</span>
+              <input
+                name="arquivo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,.mov"
+                required
+              />
+            </label>
+            <label class="campo">
+              <span>Onde vai aparecer</span>
+              <select name="local" required></select>
+            </label>
+            <label class="campo">
+              <span>Legenda <small>(opcional)</small></span>
+              <input name="legenda" maxlength="200" autocomplete="off" />
+            </label>
+            <label class="campo campo--largo">
+              <span>Descrição para leitores de tela <small>(opcional)</small></span>
+              <input name="alt" maxlength="200" autocomplete="off" placeholder="Ex.: Cães resgatados comendo ração no abrigo" />
+            </label>
+            <progress id="progresso-midia" max="100" value="0" hidden></progress>
+            <p class="mensagem" id="mensagem-midia" role="status"></p>
+            <button class="botao" type="submit" id="botao-enviar-midia">Enviar</button>
+          </form>
+          <div id="lista-midias" class="lista-midias"></div>
+        </section>
+
         <section class="cartao">
           <h2>Histórico de alterações</h2>
           <div class="tabela-rolagem">

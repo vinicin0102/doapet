@@ -44,6 +44,8 @@ export function loadConfig(env = process.env) {
     siteUrl: (
       env.SITE_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : '')
     ).replace(/\/+$/, ''),
+    // Vercel Blob (imagens e vídeos da página). Criado ao conectar um Blob Store ao projeto.
+    blobToken: env.BLOB_READ_WRITE_TOKEN || '',
     // Pix estático (sem processador): dados do recebedor usados no quadro de doações (QR Code / Pix Copia e Cola).
     // Sem a chave, o quadro aparece mas informa que o Pix ainda não está disponível.
     pixReceiver: env.PIX_CHAVE

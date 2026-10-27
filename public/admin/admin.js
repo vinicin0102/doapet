@@ -1,5 +1,7 @@
 import { MoneyError, parseBRL } from '../js/shared/money.js';
 import { computeProgress, raisedForMode } from '../js/shared/progress.js';
+import { MEDIA_TYPES, mediaKindFromName } from '../js/shared/midias.js';
+import { upload } from '../vendor/vercel-blob-client.js';
 
 const $ = (sel) => document.querySelector(sel);
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -10,6 +12,9 @@ const ACTION_LABELS = {
   configuracao_atualizada: 'Configuração atualizada',
   contribuicao_registrada: 'Contribuição externa registrada',
   contribuicao_removida: 'Contribuição externa removida',
+  midia_adicionada: 'Imagem/vídeo adicionado',
+  midia_atualizada: 'Imagem/vídeo alterado',
+  midia_removida: 'Imagem/vídeo removido',
 };
 const FIELD_LABELS = {
   meta: 'Meta',
@@ -23,6 +28,10 @@ const FIELD_LABELS = {
   referencia: 'Referência',
   dataRecebimento: 'Recebido em',
   contribuicoesExternas: 'Total de contribuições externas',
+  tipo: 'Tipo',
+  local: 'Local',
+  legenda: 'Legenda',
+  arquivo: 'Arquivo',
 };
 const STATUS_LABELS = { pendente: 'Pendente', confirmada: 'Confirmada', devolvida: 'Devolvida' };
 
@@ -107,7 +116,7 @@ async function showPanel(usuario) {
   $('#tela-login').hidden = true;
   $('#nome-usuario').textContent = `Olá, ${usuario}`;
   $('#area-usuario').hidden = false;
-  await loadState({ resetForm: true });
+  await Promise.all([loadState({ resetForm: true }), loadMedia()]);
   $('#tela-painel').hidden = false;
   subscribeUpdates();
 }
@@ -470,6 +479,204 @@ function subscribeUpdates() {
     if (csrfToken && document.visibilityState === 'visible') loadState().catch(() => {});
   }, 30000);
 }
+
+// ---------------------------------------------------------------- imagens e vídeos
+
+const formMidia = $('#form-midia');
+let mediaSlots = {};
+
+const formatSize = (bytes) =>
+  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB` : `${Math.ceil(bytes / 1024)} KB`;
+
+function slotSelect(name, selected) {
+  const select = document.createElement('select');
+  select.name = name;
+  for (const [value, label] of Object.entries(mediaSlots)) select.add(new Option(label, value, false, value === selected));
+  return select;
+}
+
+function labeled(text, input) {
+  const label = document.createElement('label');
+  label.className = 'campo';
+  const span = document.createElement('span');
+  span.textContent = text;
+  label.append(span, input);
+  return label;
+}
+
+function smallButton(text, onClick, { danger = false, disabled = false } = {}) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = `botao-pequeno${danger ? ' botao-pequeno--perigo' : ''}`;
+  b.textContent = text;
+  b.disabled = disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+async function mediaAction(fn, successText) {
+  const msg = $('#mensagem-midia');
+  try {
+    await fn();
+    setMessage(msg, successText, 'ok');
+    await Promise.all([loadMedia(), loadState()]);
+  } catch (err) {
+    setMessage(msg, err.message, 'erro');
+  }
+}
+
+function mediaItem(item, index, total) {
+  const box = document.createElement('div');
+  box.className = 'midia-item';
+
+  const preview = document.createElement(item.tipo === 'video' ? 'video' : 'img');
+  preview.className = 'midia-item__previa';
+  preview.src = item.url;
+  if (item.tipo === 'video') {
+    preview.muted = true;
+    preview.preload = 'metadata';
+    preview.controls = true;
+  } else {
+    preview.alt = item.alt;
+    preview.loading = 'lazy';
+  }
+
+  const fields = document.createElement('div');
+  fields.className = 'midia-item__campos';
+  const legenda = Object.assign(document.createElement('input'), { maxLength: 200, value: item.legenda ?? '' });
+  const alt = Object.assign(document.createElement('input'), { maxLength: 200, value: item.alt ?? '' });
+  const local = slotSelect('local', item.local);
+  const info = document.createElement('p');
+  info.className = 'midia-item__info';
+  info.textContent = `${item.tipo === 'video' ? 'Vídeo' : 'Imagem'} · ${formatSize(item.tamanho)} · enviado por ${item.enviadoPor} em ${formatDateTime(item.enviadoEm)}`;
+
+  const actions = document.createElement('div');
+  actions.className = 'midia-item__acoes';
+  actions.append(
+    smallButton('Salvar', () =>
+      mediaAction(
+        () => api('PUT', `/api/admin/midias/${item.id}`, { local: local.value, legenda: legenda.value, alt: alt.value }),
+        'Alterações salvas. A página já foi atualizada.',
+      ),
+    ),
+    smallButton('↑ Subir', () => mediaAction(() => api('POST', `/api/admin/midias/${item.id}/mover`, { direcao: 'cima' }), 'Ordem alterada.'), {
+      disabled: index === 0,
+    }),
+    smallButton('↓ Descer', () => mediaAction(() => api('POST', `/api/admin/midias/${item.id}/mover`, { direcao: 'baixo' }), 'Ordem alterada.'), {
+      disabled: index === total - 1,
+    }),
+    smallButton(
+      'Remover',
+      () => {
+        if (!window.confirm('Remover esta mídia da página? O arquivo será apagado.')) return;
+        mediaAction(() => api('DELETE', `/api/admin/midias/${item.id}`), 'Mídia removida.');
+      },
+      { danger: true },
+    ),
+  );
+
+  fields.append(labeled('Onde aparece', local), labeled('Legenda', legenda), labeled('Descrição', alt), info, actions);
+  box.append(preview, fields);
+  return box;
+}
+
+async function loadMedia() {
+  const data = await api('GET', '/api/admin/midias');
+  mediaSlots = data.locais;
+  $('#aviso-midias').hidden = data.disponivel;
+  $('#botao-enviar-midia').disabled = !data.disponivel;
+  const select = formMidia.local;
+  if (select.options.length === 0) {
+    for (const [value, label] of Object.entries(mediaSlots)) select.add(new Option(label, value));
+  }
+
+  const list = $('#lista-midias');
+  const groups = Object.entries(mediaSlots).map(([slot, label]) => {
+    const items = data.midias.filter((m) => m.local === slot);
+    if (items.length === 0) return null;
+    const group = document.createElement('div');
+    const title = document.createElement('h3');
+    title.textContent = `${label} (${items.length})`;
+    group.append(title, ...items.map((item, i) => mediaItem(item, i, items.length)));
+    return group;
+  });
+  const filled = groups.filter(Boolean);
+  if (filled.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'lista-midias__vazia';
+    empty.textContent = 'Nenhuma imagem ou vídeo enviado ainda.';
+    list.replaceChildren(empty);
+  } else {
+    list.replaceChildren(...filled);
+  }
+}
+
+/** Nome seguro para o arquivo no armazenamento (o servidor ainda acrescenta um sufixo aleatório). */
+function safeName(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const base = file.name
+    .slice(0, -(ext.length + 1))
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+    .toLowerCase();
+  return `midias/${base || 'arquivo'}.${ext}`;
+}
+
+formMidia.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('#mensagem-midia');
+  const progress = $('#progresso-midia');
+  const button = $('#botao-enviar-midia');
+  const file = formMidia.arquivo.files[0];
+  if (!file) {
+    setMessage(msg, 'Escolha um arquivo.', 'erro');
+    return;
+  }
+  const kind = mediaKindFromName(file.name);
+  if (!kind) {
+    setMessage(msg, 'Tipo de arquivo não aceito. Use JPG, PNG, WEBP, GIF, MP4, WEBM ou MOV.', 'erro');
+    return;
+  }
+  if (file.size > MEDIA_TYPES[kind].maxBytes) {
+    setMessage(msg, `Arquivo muito grande. Limite: ${formatSize(MEDIA_TYPES[kind].maxBytes)}.`, 'erro');
+    return;
+  }
+
+  button.disabled = true;
+  progress.hidden = false;
+  progress.value = 0;
+  setMessage(msg, 'Enviando…');
+  try {
+    // O arquivo vai direto do navegador para o Vercel Blob.
+    const blob = await upload(safeName(file), file, {
+      access: 'public',
+      handleUploadUrl: '/api/admin/midias/token',
+      headers: { 'X-CSRF-Token': csrfToken },
+      contentType: file.type || undefined,
+      multipart: file.size > 20 * 1024 * 1024,
+      onUploadProgress: ({ percentage }) => {
+        progress.value = percentage;
+      },
+    });
+    await api('POST', '/api/admin/midias', {
+      url: blob.url,
+      local: formMidia.local.value,
+      legenda: formMidia.legenda.value,
+      alt: formMidia.alt.value,
+    });
+    formMidia.reset();
+    setMessage(msg, 'Enviado! A mídia já aparece na página.', 'ok');
+    await Promise.all([loadMedia(), loadState()]);
+  } catch (err) {
+    setMessage(msg, err.message || 'Falha no envio. Tente novamente.', 'erro');
+  } finally {
+    button.disabled = false;
+    progress.hidden = true;
+  }
+});
 
 // ---------------------------------------------------------------- início
 

@@ -29,7 +29,7 @@ export const EXTERNAL_SOURCES = {
 
 const nowIso = () => new Date().toISOString();
 
-function cleanText(value, { field, required = false, min = 0, max = 500 }) {
+export function cleanText(value, { field, required = false, min = 0, max = 500 }) {
   if (value === undefined || value === null) value = '';
   if (typeof value !== 'string') throw new HttpError(400, `${field}: texto inválido.`);
   // Remove caracteres de controle e espaços extras.
@@ -193,7 +193,7 @@ export async function getAdminState(db) {
   };
 }
 
-function addHistory(t, { admin, action, previous, next, note }) {
+export function addHistory(t, { admin, action, previous, next, note }) {
   return t.query(
     `INSERT INTO campaign_history (changed_at, admin_username, action, previous_json, new_json, note)
      VALUES ($1, $2, $3, $4, $5, $6)`,

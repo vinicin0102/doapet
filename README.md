@@ -96,6 +96,26 @@ Nesse modo não há confirmação automática: os valores recebidos entram pelo 
 
 Sem nenhuma das duas configurações, o quadro aparece, mas avisa que o Pix está em configuração.
 
+## Imagens e vídeos da página
+
+No painel, a seção **"Imagens e vídeos da página"** permite enviar fotos e vídeos e escolher onde cada um aparece:
+
+- topo da página (abaixo do título);
+- junto da barra da campanha;
+- junto do quadro de doações;
+- seção "Sobre nós";
+- galeria (antes do rodapé).
+
+Também dá para mudar a legenda, a descrição (para leitores de tela), o local e a ordem (↑/↓), além de remover. Tudo aparece na página na hora e fica registrado no histórico.
+
+Detalhes:
+
+- Os arquivos ficam no **Vercel Blob**. Conecte um Blob Store ao projeto em Vercel → Storage; isso cria `BLOB_READ_WRITE_TOKEN`.
+- O navegador do administrador envia o arquivo **direto ao Blob**, com um token temporário (30 min) gerado pelo servidor só para administradores. Isso evita o limite de ~4,5 MB das funções.
+- Limites: imagens JPG, PNG, WEBP ou GIF até 15 MB; vídeos MP4, WEBM ou MOV até 200 MB.
+- Ao registrar, o servidor confere no próprio Blob o tipo e o tamanho reais do arquivo, e recusa (apagando) o que estiver fora das regras.
+- O cliente de upload do navegador fica em `public/vendor/vercel-blob-client.js`, gerado com `npm run build:vendor` a partir de `@vercel/blob`.
+
 ## Painel administrativo: "Gerenciar Meta da Campanha"
 
 No painel, o administrador pode:
@@ -159,11 +179,15 @@ src/campaign.js         regras da campanha (modos, histórico, contribuições, 
 src/pix.js              verificação e normalização do webhook Pix
 src/zuckpay.js          cliente da API ZuckPay e validação do postback assinado
 src/donations.js        doações pela ZuckPay: cobrança, consulta de status e confirmação
+src/media.js            imagens e vídeos da página (locais, ordem, histórico)
+src/blob.js             Vercel Blob: token de upload, consulta e exclusão de arquivos
 src/brcode.js           Pix Copia e Cola estático (BR Code), alternativa sem processador
 src/auth.js             administradores, senhas, sessões, limite de login
 src/db.js               esquema e conexão PostgreSQL (pg em produção, PGlite local)
 public/index.html       página inicial da ONG
 public/js/barra-meta.js widget da barra de progresso
+public/js/midias.js     exibe as imagens e vídeos nos locais escolhidos
+public/vendor/          cliente de upload do Vercel Blob para o navegador (gerado)
 public/js/doacao.js     quadro de doações (valores pré-definidos e código Pix Copia e Cola)
 public/js/shared/       cálculo do progresso, validação de valores e valores de doação (servidor e navegador)
 vercel.json             cabeçalhos de segurança na Vercel

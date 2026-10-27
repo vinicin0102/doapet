@@ -74,6 +74,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS external_contributions_reference
   ON external_contributions (lower(reference))
   WHERE reference IS NOT NULL AND removed_at IS NULL;
 
+-- Imagens e vídeos da página (arquivos no Vercel Blob).
+CREATE TABLE IF NOT EXISTS media (
+  id            BIGSERIAL PRIMARY KEY,
+  url           TEXT NOT NULL UNIQUE,
+  pathname      TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('imagem', 'video')),
+  content_type  TEXT NOT NULL,
+  size_bytes    BIGINT NOT NULL,
+  slot          TEXT NOT NULL,
+  position      INTEGER NOT NULL,
+  caption       TEXT,
+  alt           TEXT,
+  created_at    TEXT NOT NULL,
+  created_by    TEXT NOT NULL
+);
+
 -- Histórico de alterações administrativas (somente inserção).
 CREATE TABLE IF NOT EXISTS campaign_history (
   id             BIGSERIAL PRIMARY KEY,

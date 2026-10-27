@@ -9,6 +9,9 @@ import { MoneyError } from '../public/js/shared/money.js';
 import { PixConfigError, buildPixPayload, newTxid } from './brcode.js';
 import { normalizePixPayload, verifySignature } from './pix.js';
 import * as donations from './donations.js';
+import * as media from './media.js';
+import { createBlobStorage } from './blob.js';
+import { MEDIA_SLOTS } from '../public/js/shared/midias.js';
 import { createZuckPayClient, extractWebhookIds, verifyZuckPaySignature, ZuckPayError } from './zuckpay.js';
 
 const { HttpError } = campaign;
@@ -30,9 +33,11 @@ const MIME = {
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
+  // Imagens e vídeos vêm do Vercel Blob; o painel envia arquivos pela API do Blob (vercel.com).
   'Content-Security-Policy':
-    "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; " +
-    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' data: https://*.public.blob.vercel-storage.com; " +
+    "media-src 'self' https://*.public.blob.vercel-storage.com; style-src 'self'; script-src 'self'; " +
+    "connect-src 'self' https://vercel.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
 
 function sendJson(res, status, data, headers = {}) {
@@ -108,6 +113,22 @@ export function createApp(config) {
     zuckpayPending.push('ZUCKPAY_CLIENT_ID', 'ZUCKPAY_CLIENT_SECRET');
   }
   const canCreateZuckPay = Boolean(zuckpay && zuckpayPayer);
+
+  // Armazenamento das imagens e vídeos (Vercel Blob). Sem token, o envio fica indisponível.
+  let storage = config.blobStorage ?? null;
+  if (!storage && config.blobToken) {
+    try {
+      storage = createBlobStorage(config.blobToken);
+    } catch (err) {
+      console.error(err.message);
+    }
+  }
+  const requireStorage = () => {
+    if (!storage) {
+      throw new HttpError(503, 'O armazenamento de arquivos ainda não está configurado (Vercel Blob).');
+    }
+    return storage;
+  };
   let initPromise = null;
 
   // Inicialização preguiçosa: conecta ao banco e cria o esquema na primeira requisição
@@ -299,6 +320,48 @@ export function createApp(config) {
       await campaign.removeExternalContribution(db, session.username, Number(removeMatch[1]), await readJson(req));
       return sendJson(res, 200, { estado: await campaign.getAdminState(db) });
     }
+    // ---------- Imagens e vídeos da página ----------
+    if (route === 'GET /api/midias') {
+      return sendJson(res, 200, await media.listMediaBySlot(db));
+    }
+    if (route === 'GET /api/admin/midias') {
+      await requireAdmin(req);
+      return sendJson(res, 200, {
+        disponivel: Boolean(storage),
+        locais: MEDIA_SLOTS,
+        midias: await media.listMediaAdmin(db),
+      });
+    }
+    if (route === 'POST /api/admin/midias/token') {
+      // Chamado pelo upload() do navegador antes de enviar o arquivo direto ao Blob.
+      await requireAdmin(req);
+      const blob = requireStorage();
+      const body = await readJson(req);
+      return sendJson(res, 200, await blob.handleUploadRequest(body, async (pathname) => media.uploadTokenOptions(pathname)));
+    }
+    if (route === 'POST /api/admin/midias') {
+      const session = await requireAdmin(req);
+      const item = await media.addMedia(db, requireStorage(), session.username, await readJson(req));
+      return sendJson(res, 201, item);
+    }
+    const mediaMatch = /^\/api\/admin\/midias\/(\d+)(\/mover)?$/.exec(url.pathname);
+    if (mediaMatch) {
+      const session = await requireAdmin(req);
+      const id = Number(mediaMatch[1]);
+      if (mediaMatch[2] && req.method === 'POST') {
+        await media.moveMedia(db, id, (await readJson(req)).direcao);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (!mediaMatch[2] && req.method === 'PUT') {
+        await media.updateMedia(db, session.username, id, await readJson(req));
+        return sendJson(res, 200, { ok: true });
+      }
+      if (!mediaMatch[2] && req.method === 'DELETE') {
+        await media.removeMedia(db, storage, session.username, id);
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+
     if (route === 'GET /api/admin/historico') {
       await requireAdmin(req);
       return sendJson(res, 200, await campaign.listHistory(db, 500));

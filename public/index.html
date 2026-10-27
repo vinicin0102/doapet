@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/css/barra-meta.css" />
     <script src="/js/barra-meta.js" defer></script>
     <script src="/js/doacao.js" type="module"></script>
+    <script src="/js/midias.js" type="module"></script>
   </head>
   <body>
     <header class="topo">
@@ -33,6 +34,7 @@
             Estamos arrecadando recursos para a compra de ração para mais de
             <strong>10 mil animais resgatados</strong>. Cada doação faz diferença.
           </p>
+          <div class="midias midias--topo" data-midias="topo" hidden></div>
           <a class="botao" href="#doar">Quero ajudar</a>
         </div>
       </section>
@@ -44,6 +46,7 @@
             <div data-meta-campanha aria-live="polite">
               <p class="carregando">Carregando progresso da campanha…</p>
             </div>
+            <div class="midias" data-midias="campanha" hidden></div>
           </div>
         </div>
       </section>
@@ -55,6 +58,7 @@
             <p class="quadro-doacao__texto">
               Escolha um valor e doe via Pix. Cada real vira ração para os nossos animais.
             </p>
+            <div class="midias midias--doacao" data-midias="doacao" hidden></div>
             <form id="form-doacao" novalidate>
               <fieldset class="valores-doacao">
                 <legend class="sr-only">Valor da doação</legend>
@@ -103,6 +107,13 @@
             Os valores exibidos acima são atualizados automaticamente a partir das doações Pix confirmadas
             e das contribuições registradas pela nossa equipe.
           </p>
+          <div class="midias" data-midias="sobre" hidden></div>
+        </div>
+      </section>
+      <section id="galeria" class="secao" data-secao-midias hidden>
+        <div class="container">
+          <h2 class="secao__titulo">Galeria</h2>
+          <div class="midias midias--galeria" data-midias="galeria"></div>
         </div>
       </section>
     </main>

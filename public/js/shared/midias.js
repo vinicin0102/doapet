@@ -19,7 +19,8 @@ export const MEDIA_TYPES = {
   video: {
     extensions: ['mp4', 'webm', 'mov'],
     contentTypes: ['video/mp4', 'video/webm', 'video/quicktime'],
-    maxBytes: 200 * 1024 * 1024,
+    // 50 MB é o limite por arquivo do plano gratuito do Supabase.
+    maxBytes: 50 * 1024 * 1024,
   },
 };
 

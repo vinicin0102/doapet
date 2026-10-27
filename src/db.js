@@ -74,7 +74,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS external_contributions_reference
   ON external_contributions (lower(reference))
   WHERE reference IS NOT NULL AND removed_at IS NULL;
 
--- Imagens e vídeos da página (arquivos no Vercel Blob).
+-- Imagens e vídeos da página (arquivos no Supabase Storage).
 CREATE TABLE IF NOT EXISTS media (
   id            BIGSERIAL PRIMARY KEY,
   url           TEXT NOT NULL UNIQUE,

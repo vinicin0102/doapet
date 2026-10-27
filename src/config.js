@@ -44,8 +44,15 @@ export function loadConfig(env = process.env) {
     siteUrl: (
       env.SITE_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : '')
     ).replace(/\/+$/, ''),
-    // Vercel Blob (imagens e vídeos da página). Criado ao conectar um Blob Store ao projeto.
-    blobToken: env.BLOB_READ_WRITE_TOKEN || '',
+    // Supabase Storage (imagens e vídeos da página). A chave secreta fica só no servidor.
+    supabase:
+      (env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL) && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY)
+        ? {
+            url: (env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL).trim(),
+            key: (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY).trim(),
+            bucket: env.SUPABASE_BUCKET || 'midias',
+          }
+        : null,
     // Pix estático (sem processador): dados do recebedor usados no quadro de doações (QR Code / Pix Copia e Cola).
     // Sem a chave, o quadro aparece mas informa que o Pix ainda não está disponível.
     pixReceiver: env.PIX_CHAVE

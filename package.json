@@ -11,15 +11,12 @@
     "start": "node server.js",
     "dev": "SECURE_COOKIES=false node --watch server.js",
     "criar-admin": "node scripts/create-admin.js",
-    "test": "node --test \"test/*.test.js\"",
-    "build:vendor": "esbuild scripts/vendor-blob-entry.js --bundle --format=esm --platform=browser --minify --target=es2020 --define:process.env={} --legal-comments=eof --outfile=public/vendor/vercel-blob-client.js"
+    "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
-    "@vercel/blob": "^2.8.2",
     "pg": "^8.23.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.16",
-    "esbuild": "^0.25.12"
+    "@electric-sql/pglite": "^0.3.16"
   }
 }

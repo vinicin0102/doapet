@@ -110,11 +110,18 @@ Também dá para mudar a legenda, a descrição (para leitores de tela), o local
 
 Detalhes:
 
-- Os arquivos ficam no **Vercel Blob**. Conecte um Blob Store ao projeto em Vercel → Storage; isso cria `BLOB_READ_WRITE_TOKEN`.
-- O navegador do administrador envia o arquivo **direto ao Blob**, com um token temporário (30 min) gerado pelo servidor só para administradores. Isso evita o limite de ~4,5 MB das funções.
-- Limites: imagens JPG, PNG, WEBP ou GIF até 15 MB; vídeos MP4, WEBM ou MOV até 200 MB.
-- Ao registrar, o servidor confere no próprio Blob o tipo e o tamanho reais do arquivo, e recusa (apagando) o que estiver fora das regras.
-- O cliente de upload do navegador fica em `public/vendor/vercel-blob-client.js`, gerado com `npm run build:vendor` a partir de `@vercel/blob`.
+- Os arquivos ficam no **Supabase Storage**, num bucket público (`midias` por padrão). O site cria o bucket sozinho no primeiro envio.
+- Variáveis:
+  - `SUPABASE_URL`: em Supabase → Project Settings → API;
+  - `SUPABASE_SERVICE_ROLE_KEY` (ou `SUPABASE_SECRET_KEY`): a chave secreta, que fica só no servidor;
+  - `SUPABASE_BUCKET` (opcional).
+- O envio acontece em três etapas:
+  1. o servidor (só para administradores) confere nome, tipo e tamanho e devolve uma URL assinada do Supabase, válida por 2 horas;
+  2. o navegador envia o arquivo **direto ao Supabase**, o que evita o limite de ~4,5 MB das funções da Vercel;
+  3. o servidor confere no próprio Supabase o tipo e o tamanho reais e só então coloca o arquivo na página, apagando o que estiver fora das regras.
+- Limites:
+  - imagens JPG, PNG, WEBP ou GIF até 15 MB;
+  - vídeos MP4, WEBM ou MOV até 50 MB, que é o limite por arquivo do plano gratuito do Supabase.
 
 ## Painel administrativo: "Gerenciar Meta da Campanha"
 
@@ -180,14 +187,13 @@ src/pix.js              verificação e normalização do webhook Pix
 src/zuckpay.js          cliente da API ZuckPay e validação do postback assinado
 src/donations.js        doações pela ZuckPay: cobrança, consulta de status e confirmação
 src/media.js            imagens e vídeos da página (locais, ordem, histórico)
-src/blob.js             Vercel Blob: token de upload, consulta e exclusão de arquivos
+src/storage-supabase.js Supabase Storage: bucket, URL assinada de envio, consulta e exclusão
 src/brcode.js           Pix Copia e Cola estático (BR Code), alternativa sem processador
 src/auth.js             administradores, senhas, sessões, limite de login
 src/db.js               esquema e conexão PostgreSQL (pg em produção, PGlite local)
 public/index.html       página inicial da ONG
 public/js/barra-meta.js widget da barra de progresso
 public/js/midias.js     exibe as imagens e vídeos nos locais escolhidos
-public/vendor/          cliente de upload do Vercel Blob para o navegador (gerado)
 public/js/doacao.js     quadro de doações (valores pré-definidos e código Pix Copia e Cola)
 public/js/shared/       cálculo do progresso, validação de valores e valores de doação (servidor e navegador)
 vercel.json             cabeçalhos de segurança na Vercel

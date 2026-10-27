@@ -10,7 +10,7 @@ import { PixConfigError, buildPixPayload, newTxid } from './brcode.js';
 import { normalizePixPayload, verifySignature } from './pix.js';
 import * as donations from './donations.js';
 import * as media from './media.js';
-import { createBlobStorage } from './blob.js';
+import { createSupabaseStorage, StorageError } from './storage-supabase.js';
 import { MEDIA_SLOTS } from '../public/js/shared/midias.js';
 import { createZuckPayClient, extractWebhookIds, verifyZuckPaySignature, ZuckPayError } from './zuckpay.js';
 
@@ -33,11 +33,11 @@ const MIME = {
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
-  // Imagens e vídeos vêm do Vercel Blob; o painel envia arquivos pela API do Blob (vercel.com).
+  // Imagens e vídeos vêm do Supabase Storage; o painel envia arquivos direto para lá.
   'Content-Security-Policy':
-    "default-src 'self'; img-src 'self' data: https://*.public.blob.vercel-storage.com; " +
-    "media-src 'self' https://*.public.blob.vercel-storage.com; style-src 'self'; script-src 'self'; " +
-    "connect-src 'self' https://vercel.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' data: https://*.supabase.co; media-src 'self' https://*.supabase.co; " +
+    "style-src 'self'; script-src 'self'; connect-src 'self' https://*.supabase.co; " +
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
 
 function sendJson(res, status, data, headers = {}) {
@@ -114,18 +114,12 @@ export function createApp(config) {
   }
   const canCreateZuckPay = Boolean(zuckpay && zuckpayPayer);
 
-  // Armazenamento das imagens e vídeos (Vercel Blob). Sem token, o envio fica indisponível.
-  let storage = config.blobStorage ?? null;
-  if (!storage && config.blobToken) {
-    try {
-      storage = createBlobStorage(config.blobToken);
-    } catch (err) {
-      console.error(err.message);
-    }
-  }
+  // Armazenamento das imagens e vídeos (Supabase Storage). Sem ele, o envio fica indisponível.
+  const storage =
+    config.mediaStorage ?? (config.supabase ? createSupabaseStorage({ ...config.supabase, fetchImpl: config.fetchImpl }) : null);
   const requireStorage = () => {
     if (!storage) {
-      throw new HttpError(503, 'O armazenamento de arquivos ainda não está configurado (Vercel Blob).');
+      throw new HttpError(503, 'O armazenamento de arquivos ainda não está configurado (Supabase).');
     }
     return storage;
   };
@@ -332,12 +326,19 @@ export function createApp(config) {
         midias: await media.listMediaAdmin(db),
       });
     }
-    if (route === 'POST /api/admin/midias/token') {
-      // Chamado pelo upload() do navegador antes de enviar o arquivo direto ao Blob.
+    if (route === 'POST /api/admin/midias/envio') {
+      // Devolve a URL assinada para o navegador enviar o arquivo direto ao Supabase.
       await requireAdmin(req);
-      const blob = requireStorage();
       const body = await readJson(req);
-      return sendJson(res, 200, await blob.handleUploadRequest(body, async (pathname) => media.uploadTokenOptions(pathname)));
+      try {
+        return sendJson(res, 200, await media.prepareUpload(requireStorage(), body));
+      } catch (err) {
+        if (err instanceof StorageError) {
+          console.error(err.message);
+          throw new HttpError(502, 'O armazenamento de arquivos não respondeu. Tente novamente.');
+        }
+        throw err;
+      }
     }
     if (route === 'POST /api/admin/midias') {
       const session = await requireAdmin(req);

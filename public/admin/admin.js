@@ -1,7 +1,6 @@
 import { MoneyError, parseBRL } from '../js/shared/money.js';
 import { computeProgress, raisedForMode } from '../js/shared/progress.js';
 import { MEDIA_TYPES, mediaKindFromName } from '../js/shared/midias.js';
-import { upload } from '../vendor/vercel-blob-client.js';
 
 const $ = (sel) => document.querySelector(sel);
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -611,18 +610,21 @@ async function loadMedia() {
   }
 }
 
-/** Nome seguro para o arquivo no armazenamento (o servidor ainda acrescenta um sufixo aleatório). */
-function safeName(file) {
-  const ext = file.name.split('.').pop().toLowerCase();
-  const base = file.name
-    .slice(0, -(ext.length + 1))
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60)
-    .toLowerCase();
-  return `midias/${base || 'arquivo'}.${ext}`;
+/** Envia o arquivo direto ao armazenamento (URL assinada), informando o progresso. */
+function putFile(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.setRequestHeader('x-upsert', 'false');
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress((e.loaded / e.total) * 100);
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`O armazenamento recusou o arquivo (HTTP ${xhr.status}).`));
+    xhr.onerror = () => reject(new Error('Falha de conexão durante o envio. Tente novamente.'));
+    xhr.send(file);
+  });
 }
 
 formMidia.addEventListener('submit', async (e) => {
@@ -650,19 +652,19 @@ formMidia.addEventListener('submit', async (e) => {
   progress.value = 0;
   setMessage(msg, 'Enviando…');
   try {
-    // O arquivo vai direto do navegador para o Vercel Blob.
-    const blob = await upload(safeName(file), file, {
-      access: 'public',
-      handleUploadUrl: '/api/admin/midias/token',
-      headers: { 'X-CSRF-Token': csrfToken },
-      contentType: file.type || undefined,
-      multipart: file.size > 20 * 1024 * 1024,
-      onUploadProgress: ({ percentage }) => {
-        progress.value = percentage;
-      },
+    // 1) o servidor confere o arquivo e devolve uma URL assinada;
+    // 2) o navegador envia o arquivo direto ao armazenamento;
+    // 3) o servidor confere o arquivo recebido e o coloca na página.
+    const { caminho, uploadUrl } = await api('POST', '/api/admin/midias/envio', {
+      nome: file.name,
+      tamanho: file.size,
+      tipo: file.type,
+    });
+    await putFile(uploadUrl, file, (pct) => {
+      progress.value = pct;
     });
     await api('POST', '/api/admin/midias', {
-      url: blob.url,
+      caminho,
       local: formMidia.local.value,
       legenda: formMidia.legenda.value,
       alt: formMidia.alt.value,

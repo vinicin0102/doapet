@@ -1,5 +1,6 @@
 // Imagens e vídeos exibidos na página inicial, enviados pelo painel.
 
+import crypto from 'node:crypto';
 import { HttpError, addHistory, cleanText } from './campaign.js';
 import {
   MEDIA_SLOTS,
@@ -41,22 +42,40 @@ export async function listMediaAdmin(db) {
   }));
 }
 
+// Caminho gerado pelo servidor: "<12 caracteres aleatórios>-<nome>.<extensão>".
+const PATH_RE = /^[a-z0-9]{12}-[a-z0-9-]{1,60}\.(jpg|jpeg|png|webp|gif|mp4|webm|mov)$/;
+
+function safeBaseName(name) {
+  const withoutExt = String(name).replace(/\.[^.]*$/, '');
+  return (
+    withoutExt
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'arquivo'
+  );
+}
+
 /**
- * Regras do token de upload: só a pasta "midias/", só os tipos aceitos e o
- * tamanho máximo do tipo (imagem 15 MB, vídeo 200 MB), definidos pela extensão.
+ * Prepara o envio de um arquivo: confere tipo e tamanho declarados, escolhe o
+ * caminho no armazenamento e devolve a URL assinada para o navegador enviar.
  */
-export function uploadTokenOptions(pathname) {
-  if (!/^midias\/[A-Za-z0-9._-]{1,120}$/.test(String(pathname))) {
-    throw new HttpError(400, 'Nome de arquivo inválido.');
-  }
-  const kind = mediaKindFromName(pathname);
+export async function prepareUpload(storage, input = {}) {
+  const name = String(input.nome ?? '');
+  const kind = mediaKindFromName(name);
   if (!kind) throw new HttpError(400, 'Tipo de arquivo não aceito. Use JPG, PNG, WEBP, GIF, MP4, WEBM ou MOV.');
-  return {
-    allowedContentTypes: MEDIA_TYPES[kind].contentTypes,
-    maximumSizeInBytes: MEDIA_TYPES[kind].maxBytes,
-    addRandomSuffix: true,
-    validUntil: Date.now() + 30 * 60_000,
-  };
+  const size = Number(input.tamanho);
+  if (!Number.isFinite(size) || size <= 0) throw new HttpError(400, 'Arquivo vazio ou inválido.');
+  if (size > MEDIA_TYPES[kind].maxBytes) {
+    throw new HttpError(400, `Arquivo muito grande. Limite: ${MEDIA_TYPES[kind].maxBytes / 1024 / 1024} MB.`);
+  }
+  const ext = name.toLowerCase().split('.').pop();
+  const random = crypto.randomBytes(9).toString('base64url').toLowerCase().replace(/[^a-z0-9]/g, '0').slice(0, 12);
+  const path = `${random}-${safeBaseName(name)}.${ext}`;
+  const { uploadUrl } = await storage.createUpload(path);
+  return { caminho: path, uploadUrl };
 }
 
 function validateSlot(slot) {
@@ -69,31 +88,25 @@ const texts = (input) => ({
   alt: cleanText(input.alt, { field: 'Descrição da imagem', max: 200 }),
 });
 
-/** Registra um arquivo já enviado ao Blob. Tipo e tamanho vêm do próprio Blob, não do navegador. */
+/** Registra um arquivo já enviado. Tipo e tamanho vêm do próprio armazenamento, não do navegador. */
 export async function addMedia(db, storage, admin, input = {}) {
-  let url;
-  try {
-    url = new URL(String(input.url));
-  } catch {
-    throw new HttpError(400, 'Endereço do arquivo inválido.');
-  }
-  if (url.protocol !== 'https:' || url.host !== storage.publicHost || !url.pathname.startsWith('/midias/')) {
-    throw new HttpError(400, 'O arquivo precisa ter sido enviado pelo painel.');
-  }
+  const path = String(input.caminho ?? '');
+  if (!PATH_RE.test(path)) throw new HttpError(400, 'O arquivo precisa ter sido enviado pelo painel.');
   const slot = validateSlot(input.local);
   const { caption, alt } = texts(input);
 
   let info;
   try {
-    info = await storage.head(url.href);
+    info = await storage.head(path);
   } catch {
     throw new HttpError(400, 'Arquivo não encontrado no armazenamento. Envie novamente.');
   }
   const kind = mediaKindFromContentType(info.contentType);
-  if (!kind || info.size > MEDIA_TYPES[kind].maxBytes) {
-    await storage.del(url.href).catch(() => {});
+  if (!kind || !(info.size > 0) || info.size > MEDIA_TYPES[kind].maxBytes) {
+    await storage.del(path).catch(() => {});
     throw new HttpError(400, 'Arquivo recusado: tipo não aceito ou tamanho acima do limite.');
   }
+  const url = storage.publicUrl(path);
 
   return db.tx(async (t) => {
     await t.query('SELECT pg_advisory_xact_lock($1)', [LOCK_ID]);
@@ -102,13 +115,13 @@ export async function addMedia(db, storage, admin, input = {}) {
       `INSERT INTO media (url, pathname, kind, content_type, size_bytes, slot, position, caption, alt, created_at, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (url) DO NOTHING RETURNING *`,
-      [url.href, info.pathname, kind, info.contentType, info.size, slot, next, caption, alt, nowIso(), admin],
+      [url, path, kind, info.contentType, info.size, slot, next, caption, alt, nowIso(), admin],
     );
     if (!row) throw new HttpError(409, 'Este arquivo já foi adicionado.');
     await addHistory(t, {
       admin,
       action: 'midia_adicionada',
-      next: { tipo: kind === 'video' ? 'Vídeo' : 'Imagem', local: MEDIA_SLOTS[slot], legenda: caption, arquivo: info.pathname },
+      next: { tipo: kind === 'video' ? 'Vídeo' : 'Imagem', local: MEDIA_SLOTS[slot], legenda: caption, arquivo: path },
     });
     return toPublic(row);
   });
@@ -179,5 +192,5 @@ export async function removeMedia(db, storage, admin, id) {
     return found;
   });
   // Se apagar o arquivo falhar, ele só deixa de aparecer; o erro fica no log.
-  await storage?.del(row.url).catch((err) => console.error(`Blob: falha ao apagar ${row.pathname}: ${err.message}`));
+  await storage?.del(row.pathname).catch((err) => console.error(`Falha ao apagar ${row.pathname}: ${err.message}`));
 }

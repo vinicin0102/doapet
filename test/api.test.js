@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -10,17 +7,19 @@ import { loadConfig } from '../src/config.js';
 const SECRET = 'segredo-de-teste';
 let server;
 let base;
-let tmpDir;
 
 before(async () => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'doapet-'));
   const config = {
     ...loadConfig({}),
-    dbPath: path.join(tmpDir, 'test.db'),
+    // TEST_DATABASE_URL permite rodar os mesmos testes contra um Postgres real.
+    databaseUrl: process.env.TEST_DATABASE_URL || '',
+    localDataDir: ':memory:',
     pixWebhookSecret: SECRET,
     bootstrapAdmin: { username: 'admin', password: 'senha-super-segura' },
   };
-  ({ server } = createApp(config));
+  const app = createApp(config);
+  server = app.server;
+  await app.ready();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -28,7 +27,6 @@ before(async () => {
 after(async () => {
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
-  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 async function request(method, url, { body, cookie, csrf, headers = {}, raw } = {}) {

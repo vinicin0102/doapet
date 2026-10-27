@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { MoneyError, parsePixAmount } from './money.js';
+import { MoneyError, parsePixAmount } from '../public/js/shared/money.js';
 
 /**
  * Verifica a assinatura HMAC-SHA256 do corpo bruto do webhook.

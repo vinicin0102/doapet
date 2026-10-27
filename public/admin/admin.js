@@ -1,5 +1,5 @@
-import { MoneyError, parseBRL } from '/js/shared/money.js';
-import { computeProgress, raisedForMode } from '/js/shared/progress.js';
+import { MoneyError, parseBRL } from '../js/shared/money.js';
+import { computeProgress, raisedForMode } from '../js/shared/progress.js';
 
 const $ = (sel) => document.querySelector(sel);
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -289,6 +289,7 @@ formCampanha.addEventListener('submit', async (e) => {
       result = await api('PUT', '/api/admin/campanha', { ...payload, confirmarModoManual: true });
     }
     applyState(result.estado, { resetForm: true });
+    if (result.alterado) notifyPublicPage();
     setMessage(
       msg,
       result.alterado
@@ -360,6 +361,7 @@ formContribuicao.addEventListener('submit', async (e) => {
     f.referencia.value = '';
     f.observacao.value = '';
     applyState(result.estado);
+    notifyPublicPage();
     setMessage(
       msg,
       state.modo === 'hibrido'
@@ -382,6 +384,7 @@ async function removeContribution(c) {
   try {
     const result = await api('DELETE', `/api/admin/contribuicoes/${c.id}`, { motivo });
     applyState(result.estado);
+    notifyPublicPage();
     setMessage(msg, 'Contribuição removida.', 'ok');
   } catch (err) {
     setMessage(msg, err.message, 'erro');
@@ -452,22 +455,20 @@ function renderHistory() {
   );
 }
 
-// ---------------------------------------------------------------- tempo real
+// ---------------------------------------------------------------- atualização
 
-let eventSource = null;
+// Avisa a página pública aberta neste navegador para recarregar a barra na hora.
+const channel = 'BroadcastChannel' in window ? new BroadcastChannel('doapet-campanha') : null;
+const notifyPublicPage = () => channel?.postMessage('atualizado');
+
+let refreshTimer = null;
 function subscribeUpdates() {
-  if (eventSource || !('EventSource' in window)) return;
-  let first = true;
-  eventSource = new EventSource('/api/campanha/eventos');
+  if (refreshTimer) return;
   // Novos Pix ou alterações de outro administrador: atualiza totais e tabelas
   // sem apagar o que está sendo digitado no formulário.
-  eventSource.addEventListener('progresso', () => {
-    if (first) {
-      first = false;
-      return;
-    }
-    if (csrfToken) loadState().catch(() => {});
-  });
+  refreshTimer = setInterval(() => {
+    if (csrfToken && document.visibilityState === 'visible') loadState().catch(() => {});
+  }, 30000);
 }
 
 // ---------------------------------------------------------------- início

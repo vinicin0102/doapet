@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { describe, it } from 'node:test';
-import { MoneyError, parseBRL, parsePixAmount } from '../src/money.js';
+import { MoneyError, parseBRL, parsePixAmount } from '../public/js/shared/money.js';
 import { normalizePixPayload, verifySignature } from '../src/pix.js';
-import { computeProgress, raisedForMode } from '../src/progress.js';
+import { computeProgress, raisedForMode } from '../public/js/shared/progress.js';
 
 describe('parseBRL', () => {
   it('aceita formatos brasileiros e numéricos', () => {

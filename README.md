@@ -2,24 +2,32 @@
 
 Site da Nossa ONG com uma **barra de progresso da meta de arrecadação** (R$ 5.000,00 para a compra de ração para mais de 10 mil animais resgatados) e um **painel administrativo** para gerenciar a meta e o valor arrecadado, sem precisar alterar o código do site.
 
-- Node.js ≥ 22.13, **sem dependências externas** (`node:http` + `node:sqlite`).
-- Os dados ficam em um banco SQLite (`data/doapet.db` por padrão).
+- Node.js 22 ou 24, servidor HTTP nativo (`node:http`), banco **PostgreSQL** (driver `pg`).
+- Em produção os dados ficam no Postgres apontado por `DATABASE_URL` (ex.: Neon na Vercel).
+- Em desenvolvimento, sem `DATABASE_URL`, os dados ficam em um Postgres embutido (PGlite) em `data/pglite`.
 
-## Como rodar
+## Publicar na Vercel
+
+1. Importe o repositório na Vercel (o `server.js` é detectado automaticamente).
+2. Em **Storage → Create Database → Neon**, crie o banco e conecte ao projeto. Isso cria `DATABASE_URL`.
+3. Em **Settings → Environment Variables**, cadastre `ADMIN_USERNAME` e `ADMIN_PASSWORD` (mínimo 10 caracteres). O primeiro administrador é criado no primeiro acesso, se ainda não houver nenhum.
+4. (Opcional) Cadastre `PIX_WEBHOOK_SECRET` quando configurar o provedor Pix.
+5. Faça um novo deploy. As tabelas são criadas automaticamente.
+
+## Rodar localmente
 
 ```bash
-cp .env.example .env          # ajuste os valores
-# crie o primeiro administrador (a senha é pedida no terminal)
-npm run criar-admin -- maria
-npm start                     # http://localhost:3000
+npm install
+npm run criar-admin -- maria  # a senha é pedida no terminal
+npm run dev                   # http://localhost:3000
 ```
 
 - Página pública: `http://localhost:3000/`
 - Painel administrativo: `http://localhost:3000/admin/`
 
-Em desenvolvimento local (sem HTTPS), use `npm run dev`. Os testes rodam com `npm test`.
+Os testes rodam com `npm test`. Para rodá-los contra um Postgres real, use `TEST_DATABASE_URL=postgres://… npm test`.
 
-> Variáveis de ambiente não são lidas automaticamente do `.env`. Exporte-as no ambiente do servidor ou rode `node --env-file=.env --disable-warning=ExperimentalWarning server.js`.
+> As variáveis não são lidas automaticamente do `.env`. Use `node --env-file=.env server.js` ou exporte-as no ambiente.
 
 ## Exibição pública
 
@@ -33,7 +41,7 @@ A seção "Campanha da Ração" da página inicial mostra:
 
 Quando a arrecadação passa da meta, a página mostra o valor real e a mensagem **"Meta atingida!"**, e a barra fica limitada a 100%.
 
-A barra é atualizada **na hora** (Server-Sent Events) sempre que o administrador salva ou um Pix é confirmado, sem precisar recarregar a página.
+Os valores são lidos da API sem cache. Quem abre a página vê sempre o valor salvo mais recente. Uma página que já está aberta se atualiza sozinha a cada 15 segundos e ao voltar para a aba. No mesmo navegador do painel, a atualização é imediata após "Salvar alterações".
 
 ### Usar a barra em outro site da ONG
 
@@ -90,7 +98,7 @@ Se o seu provedor assina os webhooks de outro jeito (mTLS, token próprio etc.),
 
 - Somente administradores autenticados alteram a meta e o progresso. A página pública e a API pública (`GET /api/campanha`) são somente leitura.
 - Senhas com hash `scrypt`. A sessão fica em um cookie `HttpOnly` + `SameSite=Strict` (`Secure` em produção). Toda alteração exige também um token CSRF.
-- O login é bloqueado por 15 minutos após 5 tentativas erradas.
+- O login é bloqueado por 15 minutos após 5 tentativas erradas (controle guardado no banco).
 - **Todos os valores são validados no servidor**: sem negativos, no máximo 2 casas decimais, meta maior que zero, limite de sanidade e datas que não podem estar no futuro.
 - Os valores são guardados em centavos (inteiros), sem erros de arredondamento.
 - Edições simultâneas: se outro administrador salvou antes, o painel avisa e pede para recarregar, em vez de sobrescrever.
@@ -103,13 +111,13 @@ Se o seu provedor assina os webhooks de outro jeito (mTLS, token próprio etc.),
 server.js               inicialização do servidor HTTP
 src/app.js              rotas, autenticação das rotas, arquivos estáticos
 src/campaign.js         regras da campanha (modos, histórico, contribuições, Pix)
-src/progress.js         cálculo do percentual/barra (compartilhado com o navegador)
-src/money.js            conversão e validação de valores em R$ (compartilhado com o navegador)
 src/pix.js              verificação e normalização do webhook Pix
 src/auth.js             administradores, senhas, sessões, limite de login
-src/db.js               esquema SQLite
+src/db.js               esquema e conexão PostgreSQL (pg em produção, PGlite local)
 public/index.html       página inicial da ONG
 public/js/barra-meta.js widget da barra de progresso
+public/js/shared/       cálculo do progresso e validação de valores (usados no servidor e no navegador)
+vercel.json             cabeçalhos de segurança na Vercel
 public/admin/           painel administrativo
 scripts/create-admin.js criação de administradores
 test/                   testes (node --test)

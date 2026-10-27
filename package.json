@@ -5,12 +5,18 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13"
+    "node": "22.x || 24.x"
   },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning server.js",
-    "dev": "SECURE_COOKIES=false node --disable-warning=ExperimentalWarning --watch server.js",
-    "criar-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js",
-    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+    "start": "node server.js",
+    "dev": "SECURE_COOKIES=false node --watch server.js",
+    "criar-admin": "node scripts/create-admin.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.16"
   }
 }

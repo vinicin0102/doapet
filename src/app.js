@@ -1,22 +1,15 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import * as auth from './auth.js';
 import * as campaign from './campaign.js';
 import { openDatabase } from './db.js';
-import { ProgressBroadcaster } from './events.js';
-import { MoneyError } from './money.js';
+import { MoneyError } from '../public/js/shared/money.js';
 import { normalizePixPayload, verifySignature } from './pix.js';
 
 const { HttpError } = campaign;
 const MAX_BODY_BYTES = 64 * 1024;
-const MAX_SSE_CLIENTS = 1000;
 const SESSION_COOKIE = 'doapet_admin';
-const SHARED_MODULES = {
-  '/js/shared/money.js': fileURLToPath(new URL('./money.js', import.meta.url)),
-  '/js/shared/progress.js': fileURLToPath(new URL('./progress.js', import.meta.url)),
-};
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -93,16 +86,31 @@ function parseCookies(header = '') {
 }
 
 export function createApp(config) {
-  const db = openDatabase(config.dbPath);
-  campaign.ensureCampaign(db, config.initialGoal);
-  if (config.bootstrapAdmin && auth.countAdmins(db) === 0) {
-    auth.createAdmin(db, config.bootstrapAdmin.username, config.bootstrapAdmin.password);
-    console.log(`Administrador inicial "${config.bootstrapAdmin.username}" criado.`);
-  }
+  let db = null;
+  let loginLimiter = null;
+  let initPromise = null;
 
-  const broadcaster = new ProgressBroadcaster();
-  const loginLimiter = new auth.LoginRateLimiter();
-  const publish = () => broadcaster.publish(campaign.getPublicSummary(db));
+  // Inicialização preguiçosa: conecta ao banco e cria o esquema na primeira requisição
+  // da API. Se falhar (ex.: banco fora do ar), tenta de novo na próxima.
+  function ready() {
+    initPromise ??= (async () => {
+      if (config.onVercel && !config.databaseUrl) {
+        throw new HttpError(503, 'Banco de dados não configurado (defina DATABASE_URL).');
+      }
+      const database = await openDatabase(config);
+      await campaign.ensureCampaign(database, config.initialGoal);
+      if (config.bootstrapAdmin && (await auth.countAdmins(database)) === 0) {
+        await auth.createAdmin(database, config.bootstrapAdmin.username, config.bootstrapAdmin.password);
+        console.log(`Administrador inicial "${config.bootstrapAdmin.username}" criado.`);
+      }
+      db = database;
+      loginLimiter = new auth.LoginRateLimiter(db);
+    })().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
+    return initPromise;
+  }
 
   const clientIp = (req) =>
     (config.trustProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) ||
@@ -113,9 +121,9 @@ export function createApp(config) {
     (config.secureCookies ? '; Secure' : '');
 
   /** Exige sessão válida; para métodos que alteram dados, exige também o token CSRF. */
-  function requireAdmin(req) {
+  async function requireAdmin(req) {
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-    const session = auth.getSession(db, token);
+    const session = await auth.getSession(db, token);
     if (!session) throw new HttpError(401, 'Faça login como administrador.');
     if (req.method !== 'GET' && !auth.csrfMatches(session.csrfToken, req.headers['x-csrf-token'])) {
       throw new HttpError(403, 'Token de segurança inválido. Recarregue o painel.');
@@ -125,14 +133,11 @@ export function createApp(config) {
 
   async function handleApi(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
+    await ready();
 
     // ---------- Público (somente leitura) ----------
     if (route === 'GET /api/campanha') {
-      return sendJson(res, 200, campaign.getPublicSummary(db), { 'Access-Control-Allow-Origin': '*' });
-    }
-    if (route === 'GET /api/campanha/eventos') {
-      if (broadcaster.clients.size >= MAX_SSE_CLIENTS) throw new HttpError(503, 'Tente novamente mais tarde.');
-      return broadcaster.subscribe(req, res, campaign.getPublicSummary(db));
+      return sendJson(res, 200, await campaign.getPublicSummary(db), { 'Access-Control-Allow-Origin': '*' });
     }
 
     // ---------- Webhook do provedor Pix ----------
@@ -149,26 +154,24 @@ export function createApp(config) {
         if (err instanceof MoneyError) throw new HttpError(400, err.message);
         throw err;
       }
-      let changed = false;
-      for (const event of events) changed = campaign.recordPixEvent(db, event) || changed;
-      if (changed) publish();
+      for (const event of events) await campaign.recordPixEvent(db, event);
       return sendJson(res, 200, { ok: true, processados: events.length });
     }
 
     // ---------- Autenticação ----------
     if (route === 'POST /api/admin/login') {
       const ip = clientIp(req);
-      if (loginLimiter.isBlocked(ip)) {
+      if (await loginLimiter.isBlocked(ip)) {
         throw new HttpError(429, 'Muitas tentativas de login. Aguarde 15 minutos.');
       }
       const body = await readJson(req);
-      const admin = auth.authenticate(db, body.usuario, body.senha);
+      const admin = await auth.authenticate(db, body.usuario, body.senha);
       if (!admin) {
-        loginLimiter.recordFailure(ip);
+        await loginLimiter.recordFailure(ip);
         throw new HttpError(401, 'Usuário ou senha incorretos.');
       }
-      loginLimiter.reset(ip);
-      const session = auth.createSession(db, admin.id, config.sessionHours);
+      await loginLimiter.reset(ip);
+      const session = await auth.createSession(db, admin.id, config.sessionHours);
       return sendJson(
         res,
         200,
@@ -177,42 +180,39 @@ export function createApp(config) {
       );
     }
     if (route === 'POST /api/admin/logout') {
-      requireAdmin(req);
-      auth.destroySession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+      await requireAdmin(req);
+      await auth.destroySession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
       return sendJson(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0) });
     }
     if (route === 'GET /api/admin/sessao') {
-      const session = requireAdmin(req);
+      const session = await requireAdmin(req);
       return sendJson(res, 200, { usuario: session.username, csrfToken: session.csrfToken });
     }
 
     // ---------- Gerenciar Meta da Campanha ----------
     if (route === 'GET /api/admin/campanha') {
-      requireAdmin(req);
-      return sendJson(res, 200, campaign.getAdminState(db));
+      await requireAdmin(req);
+      return sendJson(res, 200, await campaign.getAdminState(db));
     }
     if (route === 'PUT /api/admin/campanha') {
-      const session = requireAdmin(req);
-      const result = campaign.updateCampaign(db, session.username, await readJson(req));
-      if (result.alterado) publish();
-      return sendJson(res, 200, { ...result, estado: campaign.getAdminState(db) });
+      const session = await requireAdmin(req);
+      const result = await campaign.updateCampaign(db, session.username, await readJson(req));
+      return sendJson(res, 200, { ...result, estado: await campaign.getAdminState(db) });
     }
     if (route === 'POST /api/admin/contribuicoes') {
-      const session = requireAdmin(req);
-      const result = campaign.addExternalContribution(db, session.username, await readJson(req));
-      publish();
-      return sendJson(res, 201, { ...result, estado: campaign.getAdminState(db) });
+      const session = await requireAdmin(req);
+      const result = await campaign.addExternalContribution(db, session.username, await readJson(req));
+      return sendJson(res, 201, { ...result, estado: await campaign.getAdminState(db) });
     }
     const removeMatch = /^\/api\/admin\/contribuicoes\/(\d+)$/.exec(url.pathname);
     if (req.method === 'DELETE' && removeMatch) {
-      const session = requireAdmin(req);
-      campaign.removeExternalContribution(db, session.username, Number(removeMatch[1]), await readJson(req));
-      publish();
-      return sendJson(res, 200, { estado: campaign.getAdminState(db) });
+      const session = await requireAdmin(req);
+      await campaign.removeExternalContribution(db, session.username, Number(removeMatch[1]), await readJson(req));
+      return sendJson(res, 200, { estado: await campaign.getAdminState(db) });
     }
     if (route === 'GET /api/admin/historico') {
-      requireAdmin(req);
-      return sendJson(res, 200, campaign.listHistory(db, 500));
+      await requireAdmin(req);
+      return sendJson(res, 200, await campaign.listHistory(db, 500));
     }
 
     throw new HttpError(404, 'Rota não encontrada.');
@@ -231,10 +231,8 @@ export function createApp(config) {
       return;
     }
     if (pathname.endsWith('/')) pathname += 'index.html';
-    // Módulos compartilhados com o navegador: o painel usa exatamente as mesmas
-    // regras de validação e cálculo do servidor.
-    const file = SHARED_MODULES[pathname] ?? path.resolve(config.publicDir, `.${pathname}`);
-    if (!SHARED_MODULES[pathname] && !file.startsWith(config.publicDir + path.sep)) {
+    const file = path.resolve(config.publicDir, `.${pathname}`);
+    if (!file.startsWith(config.publicDir + path.sep)) {
       res.writeHead(403, SECURITY_HEADERS).end();
       return;
     }
@@ -281,9 +279,8 @@ export function createApp(config) {
   });
 
   server.on('close', () => {
-    broadcaster.close();
-    db.close();
+    db?.close();
   });
 
-  return { server, db };
+  return { server, ready };
 }

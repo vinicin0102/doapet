@@ -6,8 +6,9 @@
  *   <div data-meta-campanha></div>
  *   <script src="https://SEU-SITE/js/barra-meta.js" defer></script>
  *
- * Os valores vêm da API (/api/campanha) e são atualizados em tempo real
- * (Server-Sent Events) sempre que o administrador salva ou um Pix é confirmado.
+ * Os valores vêm da API (/api/campanha), sempre sem cache. A página consulta
+ * de novo a cada 15 segundos e ao voltar para a aba; no mesmo navegador do
+ * painel, a atualização é imediata após "Salvar alterações".
  */
 (function () {
   'use strict';
@@ -99,21 +100,16 @@
     };
 
     load();
-    if ('EventSource' in window) {
-      var source = new EventSource(apiUrl + '/eventos');
-      source.addEventListener('progresso', function (e) {
-        try {
-          update(JSON.parse(e.data));
-        } catch (err) {
-          /* ignora mensagem malformada */
-        }
-      });
-    }
-    // Garantia extra caso a conexão em tempo real caia.
-    setInterval(load, 60000);
+    setInterval(function () {
+      if (document.visibilityState === 'visible') load();
+    }, 15000);
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') load();
     });
+    // Aviso instantâneo do painel administrativo aberto no mesmo navegador.
+    if ('BroadcastChannel' in window) {
+      new BroadcastChannel('doapet-campanha').onmessage = load;
+    }
   }
 
   window.BarraMeta = { render: render };

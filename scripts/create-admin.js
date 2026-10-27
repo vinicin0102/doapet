@@ -19,13 +19,14 @@ if (!password) {
   rl.close();
 }
 
-const db = openDatabase(loadConfig().dbPath);
+// Usa DATABASE_URL (produção) ou o banco local de desenvolvimento.
+const db = await openDatabase(loadConfig());
 try {
-  createAdmin(db, username, password);
+  await createAdmin(db, username, password);
   console.log(`Administrador "${username}" criado com sucesso.`);
 } catch (err) {
-  console.error(err.message.includes('UNIQUE') ? 'Este usuário já existe.' : err.message);
+  console.error(err.message);
   process.exitCode = 1;
 } finally {
-  db.close();
+  await db.close();
 }

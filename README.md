@@ -11,8 +11,9 @@ Site da Nossa ONG com uma **barra de progresso da meta de arrecadação** (R$ 5.
 1. Importe o repositório na Vercel (o `server.js` é detectado automaticamente).
 2. Em **Storage → Create Database → Neon**, crie o banco e conecte ao projeto. Isso cria `DATABASE_URL`.
 3. Em **Settings → Environment Variables**, cadastre `ADMIN_USERNAME` e `ADMIN_PASSWORD` (mínimo 10 caracteres). O primeiro administrador é criado no primeiro acesso, se ainda não houver nenhum.
-4. (Opcional) Cadastre `PIX_WEBHOOK_SECRET` quando configurar o provedor Pix.
-5. Faça um novo deploy. As tabelas são criadas automaticamente.
+4. Para o quadro de doações, cadastre `PIX_CHAVE`, `PIX_NOME_RECEBEDOR` e `PIX_CIDADE` (veja abaixo).
+5. (Opcional) Cadastre `PIX_WEBHOOK_SECRET` quando configurar o provedor Pix.
+6. Faça um novo deploy. As tabelas são criadas automaticamente.
 
 ## Rodar localmente
 
@@ -50,6 +51,24 @@ Os valores são lidos da API sem cache. Quem abre a página vê sempre o valor s
 <div data-meta-campanha></div>
 <script src="https://SEU-DOMINIO/js/barra-meta.js" defer></script>
 ```
+
+## Quadro de doações
+
+Logo abaixo da barra, a seção **"Faça sua doação"** oferece os valores **R$ 5, 10, 15, 25, 30, 50 e 100**. O de **R$ 50** aparece destacado como **"Mais escolhido"** e já vem selecionado. Ao clicar em **"Doar R$ X via Pix"**, o site gera:
+
+- o **QR Code Pix** com o valor já preenchido;
+- o código **Pix Copia e Cola**, com um botão para copiar.
+
+Detalhes:
+
+- O código segue o padrão BR Code do Banco Central, com a chave da ONG e um identificador único (`txid`) por doação. Esse `txid` permite conciliar o pagamento no webhook.
+- Os valores ficam em `public/js/shared/doacao.js`. O servidor só gera Pix para esses valores.
+- Gerar o Pix **não** altera a arrecadação: a barra só muda quando o pagamento é confirmado (webhook) ou registrado pelo administrador.
+- Variáveis necessárias:
+  - `PIX_CHAVE`: e-mail, `+55DDDNÚMERO`, CPF, CNPJ ou chave aleatória;
+  - `PIX_NOME_RECEBEDOR`: até 25 caracteres, sem acentos;
+  - `PIX_CIDADE`: até 15 caracteres.
+- Sem essas variáveis, o quadro aparece, mas avisa que o Pix está em configuração. Nenhuma chave fictícia é exibida.
 
 ## Painel administrativo: "Gerenciar Meta da Campanha"
 
@@ -112,11 +131,13 @@ server.js               inicialização do servidor HTTP
 src/app.js              rotas, autenticação das rotas, arquivos estáticos
 src/campaign.js         regras da campanha (modos, histórico, contribuições, Pix)
 src/pix.js              verificação e normalização do webhook Pix
+src/brcode.js           geração do Pix Copia e Cola (BR Code) do quadro de doações
 src/auth.js             administradores, senhas, sessões, limite de login
 src/db.js               esquema e conexão PostgreSQL (pg em produção, PGlite local)
 public/index.html       página inicial da ONG
 public/js/barra-meta.js widget da barra de progresso
-public/js/shared/       cálculo do progresso e validação de valores (usados no servidor e no navegador)
+public/js/doacao.js     quadro de doações (valores pré-definidos, QR Code e Copia e Cola)
+public/js/shared/       cálculo do progresso, validação de valores e valores de doação (servidor e navegador)
 vercel.json             cabeçalhos de segurança na Vercel
 public/admin/           painel administrativo
 scripts/create-admin.js criação de administradores

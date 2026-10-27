@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/css/style.css" />
     <link rel="stylesheet" href="/css/barra-meta.css" />
     <script src="/js/barra-meta.js" defer></script>
+    <script src="/js/doacao.js" type="module"></script>
   </head>
   <body>
     <header class="topo">
@@ -18,6 +19,7 @@
         <a class="marca" href="/">🐾 DoaPet</a>
         <nav class="menu" aria-label="Principal">
           <a href="#campanha">Campanha</a>
+          <a href="#doar">Doar</a>
           <a href="#sobre">Sobre nós</a>
         </nav>
       </div>
@@ -31,7 +33,7 @@
             Estamos arrecadando recursos para a compra de ração para mais de
             <strong>10 mil animais resgatados</strong>. Cada doação faz diferença.
           </p>
-          <a class="botao" href="#campanha">Quero ajudar</a>
+          <a class="botao" href="#doar">Quero ajudar</a>
         </div>
       </section>
 
@@ -41,6 +43,41 @@
             <h2 class="secao__titulo">Campanha da Ração</h2>
             <div data-meta-campanha aria-live="polite">
               <p class="carregando">Carregando progresso da campanha…</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="doar" class="secao secao--doacao">
+        <div class="container">
+          <div class="cartao quadro-doacao">
+            <h2 class="secao__titulo">Faça sua doação</h2>
+            <p class="quadro-doacao__texto">
+              Escolha um valor e doe via Pix. Cada real vira ração para os nossos animais.
+            </p>
+            <form id="form-doacao" novalidate>
+              <fieldset class="valores-doacao">
+                <legend class="sr-only">Valor da doação</legend>
+                <div id="opcoes-doacao" class="valores-doacao__grade"></div>
+              </fieldset>
+              <button class="botao botao--largo" type="submit" id="botao-doar">Doar via Pix</button>
+              <p class="mensagem-doacao" id="mensagem-doacao" role="status" aria-live="polite"></p>
+            </form>
+            <noscript><p class="mensagem-doacao">Ative o JavaScript para gerar o Pix da sua doação.</p></noscript>
+
+            <div id="pagamento-pix" class="pagamento-pix" hidden>
+              <h3 id="titulo-pagamento">Pix</h3>
+              <img id="qr-pix" alt="QR Code Pix da doação" width="240" height="240" />
+              <p>
+                Abra o app do seu banco, escolha <strong>Pix → Pagar com QR Code</strong> ou use o
+                código abaixo em <strong>Pix Copia e Cola</strong>:
+              </p>
+              <label class="sr-only" for="copia-cola">Código Pix Copia e Cola</label>
+              <textarea id="copia-cola" rows="3" readonly></textarea>
+              <button type="button" class="botao botao--secundario" id="botao-copiar">Copiar código Pix</button>
+              <p class="pagamento-pix__nota">
+                Obrigado! Sua doação entra na barra da campanha assim que o pagamento for confirmado.
+              </p>
             </div>
           </div>
         </div>

@@ -4,7 +4,10 @@ import path from 'node:path';
 import * as auth from './auth.js';
 import * as campaign from './campaign.js';
 import { openDatabase } from './db.js';
+import QRCode from 'qrcode';
+import { DONATION_PRESETS } from '../public/js/shared/doacao.js';
 import { MoneyError } from '../public/js/shared/money.js';
+import { PixConfigError, buildPixPayload, newTxid } from './brcode.js';
 import { normalizePixPayload, verifySignature } from './pix.js';
 
 const { HttpError } = campaign;
@@ -133,6 +136,37 @@ export function createApp(config) {
 
   async function handleApi(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
+
+    // ---------- Quadro de doações: gera o Pix Copia e Cola do valor escolhido ----------
+    if (route === 'POST /api/doacoes/pix') {
+      const body = await readJson(req);
+      const valor = Number(body.valor);
+      if (!DONATION_PRESETS.includes(valor)) throw new HttpError(400, 'Escolha um dos valores disponíveis.');
+      if (!config.pixReceiver) {
+        throw new HttpError(503, 'As doações via Pix estão em configuração. Volte em breve!', {
+          codigo: 'PIX_NAO_CONFIGURADO',
+        });
+      }
+      let copiaECola;
+      try {
+        copiaECola = buildPixPayload({
+          ...config.pixReceiver,
+          amountCents: valor * 100,
+          txid: newTxid(),
+          description: 'Doacao racao',
+        });
+      } catch (err) {
+        if (!(err instanceof PixConfigError)) throw err;
+        console.error('Configuração Pix inválida:', err.message);
+        throw new HttpError(503, 'As doações via Pix estão em configuração. Volte em breve!', {
+          codigo: 'PIX_NAO_CONFIGURADO',
+        });
+      }
+      const qrCode = await QRCode.toDataURL(copiaECola, { errorCorrectionLevel: 'M', margin: 1, width: 280 });
+      return sendJson(res, 200, { valor, copiaECola, qrCode });
+    }
+
+    // Demais rotas dependem do banco de dados.
     await ready();
 
     // ---------- Público (somente leitura) ----------

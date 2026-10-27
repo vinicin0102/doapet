@@ -15,6 +15,7 @@ before(async () => {
     databaseUrl: process.env.TEST_DATABASE_URL || '',
     localDataDir: ':memory:',
     pixWebhookSecret: SECRET,
+    pixReceiver: { key: 'doacoes@nossaong.org', name: 'Nossa ONG', city: 'Sao Paulo' },
     bootstrapAdmin: { username: 'admin', password: 'senha-super-segura' },
   };
   const app = createApp(config);
@@ -243,6 +244,22 @@ describe('API da campanha', () => {
   it('logout invalida a sessão', async () => {
     assert.equal((await request('POST', '/api/admin/logout', admin)).status, 200);
     assert.equal((await request('GET', '/api/admin/campanha', admin)).status, 401);
+  });
+
+  it('quadro de doações gera Pix somente para os valores pré-definidos', async () => {
+    for (const valor of [5, 10, 15, 25, 30, 50, 100]) {
+      const res = await request('POST', '/api/doacoes/pix', { body: { valor } });
+      assert.equal(res.status, 200);
+      assert.equal(res.data.valor, valor);
+      assert.ok(res.data.copiaECola.includes(`54${String((valor).toFixed(2).length).padStart(2, '0')}${valor.toFixed(2)}`));
+      assert.match(res.data.qrCode, /^data:image\/png;base64,/);
+    }
+    for (const valor of [0, -50, 7, 1000, '50; DROP', null]) {
+      const res = await request('POST', '/api/doacoes/pix', { body: { valor } });
+      assert.equal(res.status, 400, String(valor));
+    }
+    // Gerar o Pix não altera a arrecadação: só um pagamento confirmado conta.
+    assert.equal((await request('GET', '/api/campanha')).data.arrecadado, 250);
   });
 
   it('serve a página pública e os módulos compartilhados, sem expor arquivos fora de public/', async () => {

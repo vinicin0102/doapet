@@ -20,7 +20,23 @@ export function loadConfig(env = process.env) {
     // Segredo compartilhado com o provedor Pix para assinar os webhooks (HMAC-SHA256).
     // Sem ele, o webhook fica desativado e nenhuma doação é registrada automaticamente.
     pixWebhookSecret: env.PIX_WEBHOOK_SECRET || '',
-    // Dados do recebedor usados no quadro de doações (QR Code / Pix Copia e Cola).
+    // Processador de pagamentos ZuckPay (credenciais em Desenvolvedores > Credenciais API).
+    // Quando configurado, o quadro de doações cria cobranças Pix pela ZuckPay e os
+    // pagamentos confirmados entram na campanha automaticamente.
+    zuckpay:
+      env.ZUCKPAY_CLIENT_ID && env.ZUCKPAY_CLIENT_SECRET
+        ? {
+            clientId: env.ZUCKPAY_CLIENT_ID.trim(),
+            clientSecret: env.ZUCKPAY_CLIENT_SECRET.trim(),
+            webhookSecret: (env.ZUCKPAY_WEBHOOK_SECRET || '').trim(),
+            baseUrl: env.ZUCKPAY_BASE_URL || undefined,
+          }
+        : null,
+    // Endereço público do site (para a ZuckPay avisar os pagamentos). Na Vercel é detectado sozinho.
+    siteUrl: (
+      env.SITE_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : '')
+    ).replace(/\/+$/, ''),
+    // Pix estático (sem processador): dados do recebedor usados no quadro de doações (QR Code / Pix Copia e Cola).
     // Sem a chave, o quadro aparece mas informa que o Pix ainda não está disponível.
     pixReceiver: env.PIX_CHAVE
       ? { key: env.PIX_CHAVE, name: env.PIX_NOME_RECEBEDOR || '', city: env.PIX_CIDADE || '' }

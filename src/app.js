@@ -5,10 +5,12 @@ import * as auth from './auth.js';
 import * as campaign from './campaign.js';
 import { openDatabase } from './db.js';
 import QRCode from 'qrcode';
-import { DONATION_PRESETS } from '../public/js/shared/doacao.js';
+import { DONATION_PRESETS, MOST_CHOSEN, validateDonor } from '../public/js/shared/doacao.js';
 import { MoneyError } from '../public/js/shared/money.js';
 import { PixConfigError, buildPixPayload, newTxid } from './brcode.js';
 import { normalizePixPayload, verifySignature } from './pix.js';
+import * as donations from './donations.js';
+import { createZuckPayClient, extractWebhookIds, verifyZuckPaySignature, ZuckPayError } from './zuckpay.js';
 
 const { HttpError } = campaign;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -91,6 +93,8 @@ function parseCookies(header = '') {
 export function createApp(config) {
   let db = null;
   let loginLimiter = null;
+  let pixLimiter = null;
+  const zuckpay = config.zuckpay ? createZuckPayClient({ ...config.zuckpay, fetchImpl: config.fetchImpl }) : null;
   let initPromise = null;
 
   // Inicialização preguiçosa: conecta ao banco e cria o esquema na primeira requisição
@@ -107,7 +111,9 @@ export function createApp(config) {
         console.log(`Administrador inicial "${config.bootstrapAdmin.username}" criado.`);
       }
       db = database;
-      loginLimiter = new auth.LoginRateLimiter(db);
+      loginLimiter = new auth.RateLimiter(db);
+      // Evita abuso na criação de cobranças: até 10 Pix gerados por IP a cada 10 minutos.
+      pixLimiter = new auth.RateLimiter(db, { maxAttempts: 10, windowMs: 10 * 60_000 });
     })().catch((err) => {
       initPromise = null;
       throw err;
@@ -137,11 +143,21 @@ export function createApp(config) {
   async function handleApi(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
 
-    // ---------- Quadro de doações: gera o Pix Copia e Cola do valor escolhido ----------
+    // ---------- Quadro de doações ----------
+    if (route === 'GET /api/doacoes/config') {
+      return sendJson(res, 200, {
+        // "zuckpay": cobrança pelo processador (pede dados do doador); "pix": Pix estático; null: indisponível.
+        provedor: zuckpay ? 'zuckpay' : config.pixReceiver ? 'pix' : null,
+        valores: DONATION_PRESETS,
+        maisEscolhido: MOST_CHOSEN,
+      });
+    }
+
     if (route === 'POST /api/doacoes/pix') {
       const body = await readJson(req);
       const valor = Number(body.valor);
       if (!DONATION_PRESETS.includes(valor)) throw new HttpError(400, 'Escolha um dos valores disponíveis.');
+      if (zuckpay) return createZuckPayDonation(req, res, valor, body);
       if (!config.pixReceiver) {
         throw new HttpError(503, 'As doações via Pix estão em configuração. Volte em breve!', {
           codigo: 'PIX_NAO_CONFIGURADO',
@@ -162,8 +178,7 @@ export function createApp(config) {
           codigo: 'PIX_NAO_CONFIGURADO',
         });
       }
-      const qrCode = await QRCode.toDataURL(copiaECola, { errorCorrectionLevel: 'M', margin: 1, width: 280 });
-      return sendJson(res, 200, { valor, copiaECola, qrCode });
+      return sendJson(res, 200, { valor, copiaECola, qrCode: await qrDataUrl(copiaECola) });
     }
 
     // Demais rotas dependem do banco de dados.
@@ -172,6 +187,32 @@ export function createApp(config) {
     // ---------- Público (somente leitura) ----------
     if (route === 'GET /api/campanha') {
       return sendJson(res, 200, await campaign.getPublicSummary(db), { 'Access-Control-Allow-Origin': '*' });
+    }
+
+    // ---------- Status da doação (a página consulta até o pagamento ser confirmado) ----------
+    if (route === 'GET /api/doacoes/status') {
+      if (!zuckpay) throw new HttpError(404, 'Rota não encontrada.');
+      return sendJson(res, 200, await donations.getDonationStatus(db, zuckpay, url.searchParams.get('id')));
+    }
+
+    // ---------- Postback da ZuckPay ----------
+    // O corpo só identifica a cobrança; o status e o valor são sempre confirmados
+    // na API da ZuckPay. Assim, um aviso falso não consegue inflar a arrecadação.
+    if (route === 'POST /api/zuckpay/webhook') {
+      if (!zuckpay) throw new HttpError(503, 'ZuckPay não configurada.');
+      const raw = await readBody(req);
+      if (
+        config.zuckpay.webhookSecret &&
+        !verifyZuckPaySignature(raw, req.headers['x-zuckpay-signature'], config.zuckpay.webhookSecret)
+      ) {
+        throw new HttpError(401, 'Assinatura inválida.');
+      }
+      const ids = extractWebhookIds(parseJson(raw));
+      const txid = await donations.findDonationTxid(db, ids);
+      // Vendas da conta que não são doações deste site: confirma o recebimento e ignora.
+      if (!txid) return sendJson(res, 200, { ok: true, ignorado: true });
+      const status = await donations.syncDonation(db, zuckpay, txid, { force: true });
+      return sendJson(res, 200, { ok: true, status });
     }
 
     // ---------- Webhook do provedor Pix ----------
@@ -195,16 +236,16 @@ export function createApp(config) {
     // ---------- Autenticação ----------
     if (route === 'POST /api/admin/login') {
       const ip = clientIp(req);
-      if (await loginLimiter.isBlocked(ip)) {
+      if (await loginLimiter.isBlocked(`login:${ip}`)) {
         throw new HttpError(429, 'Muitas tentativas de login. Aguarde 15 minutos.');
       }
       const body = await readJson(req);
       const admin = await auth.authenticate(db, body.usuario, body.senha);
       if (!admin) {
-        await loginLimiter.recordFailure(ip);
+        await loginLimiter.hit(`login:${ip}`);
         throw new HttpError(401, 'Usuário ou senha incorretos.');
       }
-      await loginLimiter.reset(ip);
+      await loginLimiter.reset(`login:${ip}`);
       const session = await auth.createSession(db, admin.id, config.sessionHours);
       return sendJson(
         res,
@@ -250,6 +291,36 @@ export function createApp(config) {
     }
 
     throw new HttpError(404, 'Rota não encontrada.');
+  }
+
+  const qrDataUrl = (text) => QRCode.toDataURL(text, { errorCorrectionLevel: 'M', margin: 1, width: 280 });
+
+  async function createZuckPayDonation(req, res, valor, body) {
+    const { dados, erros } = validateDonor(body);
+    if (erros) throw new HttpError(400, Object.values(erros)[0], { campos: erros });
+    await ready();
+    const key = `pix:${clientIp(req)}`;
+    if (await pixLimiter.isBlocked(key)) {
+      throw new HttpError(429, 'Muitos Pix gerados em pouco tempo. Aguarde alguns minutos.');
+    }
+    await pixLimiter.hit(key);
+    let charge;
+    try {
+      charge = await donations.createDonationCharge(db, zuckpay, {
+        valor,
+        doador: dados,
+        urlnoty: config.siteUrl.startsWith('https://') ? `${config.siteUrl}/api/zuckpay/webhook` : undefined,
+      });
+    } catch (err) {
+      if (err instanceof ZuckPayError) throw new HttpError(err.status, err.message);
+      throw err;
+    }
+    return sendJson(res, 200, {
+      valor,
+      id: charge.id,
+      copiaECola: charge.copiaECola,
+      qrCode: await qrDataUrl(charge.copiaECola),
+    });
   }
 
   function serveStatic(req, res, url) {

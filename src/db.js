@@ -20,8 +20,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at  TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS login_failures (
-  ip          TEXT PRIMARY KEY,
+-- Limites de tentativas (login, geração de Pix) por chave, ex.: "login:<ip>".
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key         TEXT PRIMARY KEY,
   count       INTEGER NOT NULL,
   first_at    TEXT NOT NULL
 );
@@ -49,6 +50,11 @@ CREATE TABLE IF NOT EXISTS pix_donations (
   received_at    TEXT NOT NULL,
   updated_at     TEXT NOT NULL
 );
+
+-- Cobranças criadas no processador de pagamentos (ZuckPay): txid = nosso external_id_client.
+ALTER TABLE pix_donations ADD COLUMN IF NOT EXISTS provider TEXT;
+ALTER TABLE pix_donations ADD COLUMN IF NOT EXISTS provider_tx_id TEXT;
+ALTER TABLE pix_donations ADD COLUMN IF NOT EXISTS last_checked_at TEXT;
 
 -- Contribuições recebidas por outros meios (usadas no modo híbrido).
 CREATE TABLE IF NOT EXISTS external_contributions (

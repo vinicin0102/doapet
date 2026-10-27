@@ -151,7 +151,7 @@ export async function getAdminState(db) {
   );
   const pix = await db.query(
     `SELECT txid, amount_cents, refunded_cents, status, paid_at, received_at
-       FROM pix_donations ORDER BY received_at DESC LIMIT 20`,
+       FROM pix_donations WHERE status <> 'pendente' ORDER BY COALESCE(paid_at, updated_at) DESC LIMIT 20`,
   );
   return {
     versao: settings.version,

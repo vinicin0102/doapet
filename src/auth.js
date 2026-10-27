@@ -94,10 +94,10 @@ export function csrfMatches(expected, received) {
 }
 
 /**
- * Limite de tentativas de login por IP, guardado no banco (funciona com
- * várias instâncias do servidor, como na Vercel).
+ * Limite de tentativas por chave (ex.: "login:<ip>"), guardado no banco para
+ * funcionar com várias instâncias do servidor, como na Vercel.
  */
-export class LoginRateLimiter {
+export class RateLimiter {
   constructor(db, { maxAttempts = 5, windowMs = 15 * 60_000 } = {}) {
     this.db = db;
     this.maxAttempts = maxAttempts;
@@ -106,23 +106,23 @@ export class LoginRateLimiter {
   #windowStart() {
     return new Date(Date.now() - this.windowMs).toISOString();
   }
-  async isBlocked(ip) {
-    const row = await this.db.one('SELECT count FROM login_failures WHERE ip = $1 AND first_at >= $2', [
-      ip,
+  async isBlocked(key) {
+    const row = await this.db.one('SELECT count FROM rate_limits WHERE key = $1 AND first_at >= $2', [
+      key,
       this.#windowStart(),
     ]);
     return Boolean(row && row.count >= this.maxAttempts);
   }
-  async recordFailure(ip) {
+  async hit(key) {
     await this.db.query(
-      `INSERT INTO login_failures (ip, count, first_at) VALUES ($1, 1, $2)
-       ON CONFLICT (ip) DO UPDATE SET
-         count    = CASE WHEN login_failures.first_at < $3 THEN 1 ELSE login_failures.count + 1 END,
-         first_at = CASE WHEN login_failures.first_at < $3 THEN $2 ELSE login_failures.first_at END`,
-      [ip, new Date().toISOString(), this.#windowStart()],
+      `INSERT INTO rate_limits (key, count, first_at) VALUES ($1, 1, $2)
+       ON CONFLICT (key) DO UPDATE SET
+         count    = CASE WHEN rate_limits.first_at < $3 THEN 1 ELSE rate_limits.count + 1 END,
+         first_at = CASE WHEN rate_limits.first_at < $3 THEN $2 ELSE rate_limits.first_at END`,
+      [key, new Date().toISOString(), this.#windowStart()],
     );
   }
-  async reset(ip) {
-    await this.db.query('DELETE FROM login_failures WHERE ip = $1', [ip]);
+  async reset(key) {
+    await this.db.query('DELETE FROM rate_limits WHERE key = $1', [key]);
   }
 }

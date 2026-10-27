@@ -11,7 +11,7 @@ Site da Nossa ONG com uma **barra de progresso da meta de arrecadação** (R$ 5.
 1. Importe o repositório na Vercel (o `server.js` é detectado automaticamente).
 2. Em **Storage → Create Database → Neon**, crie o banco e conecte ao projeto. Isso cria `DATABASE_URL`.
 3. Em **Settings → Environment Variables**, cadastre `ADMIN_USERNAME` e `ADMIN_PASSWORD` (mínimo 10 caracteres). O primeiro administrador é criado no primeiro acesso, se ainda não houver nenhum.
-4. Para o quadro de doações, cadastre `PIX_CHAVE`, `PIX_NOME_RECEBEDOR` e `PIX_CIDADE` (veja abaixo).
+4. Para o quadro de doações, cadastre as credenciais da ZuckPay: `ZUCKPAY_CLIENT_ID`, `ZUCKPAY_CLIENT_SECRET` e `ZUCKPAY_WEBHOOK_SECRET` (veja abaixo).
 5. (Opcional) Cadastre `PIX_WEBHOOK_SECRET` quando configurar o provedor Pix.
 6. Faça um novo deploy. As tabelas são criadas automaticamente.
 
@@ -54,21 +54,46 @@ Os valores são lidos da API sem cache. Quem abre a página vê sempre o valor s
 
 ## Quadro de doações
 
-Logo abaixo da barra, a seção **"Faça sua doação"** oferece os valores **R$ 5, 10, 15, 25, 30, 50 e 100**. O de **R$ 50** aparece destacado como **"Mais escolhido"** e já vem selecionado. Ao clicar em **"Doar R$ X via Pix"**, o site gera:
+Logo abaixo da barra, a seção **"Faça sua doação"** oferece os valores **R$ 5, 10, 15, 25, 30, 50 e 100**. O de **R$ 50** aparece destacado como **"Mais escolhido"** e já vem selecionado. Os valores ficam em `public/js/shared/doacao.js`, e o servidor só aceita esses.
 
-- o **QR Code Pix** com o valor já preenchido;
-- o código **Pix Copia e Cola**, com um botão para copiar.
+### Pagamentos pela ZuckPay (recomendado)
 
-Detalhes:
+Com as credenciais da ZuckPay configuradas:
 
-- O código segue o padrão BR Code do Banco Central, com a chave da ONG e um identificador único (`txid`) por doação. Esse `txid` permite conciliar o pagamento no webhook.
-- Os valores ficam em `public/js/shared/doacao.js`. O servidor só gera Pix para esses valores.
-- Gerar o Pix **não** altera a arrecadação: a barra só muda quando o pagamento é confirmado (webhook) ou registrado pelo administrador.
-- Variáveis necessárias:
-  - `PIX_CHAVE`: e-mail, `+55DDDNÚMERO`, CPF, CNPJ ou chave aleatória;
-  - `PIX_NOME_RECEBEDOR`: até 25 caracteres, sem acentos;
-  - `PIX_CIDADE`: até 15 caracteres.
-- Sem essas variáveis, o quadro aparece, mas avisa que o Pix está em configuração. Nenhuma chave fictícia é exibida.
+1. O doador escolhe o valor e informa nome, CPF, e-mail e celular. São campos obrigatórios da API da ZuckPay: os dados vão só para a ZuckPay e não são guardados no site.
+2. O site cria a cobrança (`POST /v3/pix/qrcode`) com um `external_id_client` único (`DOAPET…`). Ele serve de chave de idempotência e de identificação da doação.
+3. A página mostra o QR Code e o Pix Copia e Cola, depois acompanha o pagamento.
+4. A confirmação chega de dois jeitos, e qualquer um basta:
+   - **Postback** da ZuckPay em `/api/zuckpay/webhook` (enviado para a `urlnoty` da cobrança). A assinatura `X-ZuckPay-Signature` é validada quando `ZUCKPAY_WEBHOOK_SECRET` está definido, com tolerância de 5 minutos.
+   - **Consulta de status** feita enquanto a página do doador está aberta.
+5. Em ambos os casos o site **confirma o status e o valor direto na API da ZuckPay** (`GET /v3/pix/status`). Um aviso falso não consegue aumentar a arrecadação.
+6. Só pagamentos `PAID` entram na barra (modos automático e híbrido), uma única vez. Estornos (`REFUNDED`, `CHARGEBACK`) são descontados. Vendas da conta ZuckPay que não foram geradas por este site são ignoradas.
+
+Variáveis:
+
+| Variável | Onde obter |
+|---|---|
+| `ZUCKPAY_CLIENT_ID` e `ZUCKPAY_CLIENT_SECRET` | Painel ZuckPay → Desenvolvedores → Credenciais API |
+| `ZUCKPAY_WEBHOOK_SECRET` | Painel ZuckPay → `keys.php` → card "Webhook Secret" |
+| `SITE_URL` (opcional) | Endereço público do site. Na Vercel é detectado automaticamente |
+
+Observações:
+
+- Algumas adquirentes exigem valor mínimo de R$ 10,00. Se a ZuckPay recusar o valor de R$ 5, o doador vê a mensagem da ZuckPay.
+- Para evitar abuso, cada IP pode gerar até 10 Pix a cada 10 minutos.
+- Cobranças geradas e não pagas não contam na meta e não aparecem na lista de Pix do painel.
+
+### Alternativa: Pix estático (sem processador)
+
+Sem ZuckPay, o site pode gerar um Pix Copia e Cola (BR Code do Banco Central) direto para a chave da ONG. Para isso, defina:
+
+- `PIX_CHAVE`: e-mail, `+55DDDNÚMERO`, CPF, CNPJ ou chave aleatória;
+- `PIX_NOME_RECEBEDOR`: até 25 caracteres;
+- `PIX_CIDADE`: até 15 caracteres.
+
+Nesse modo não há confirmação automática: os valores recebidos entram pelo painel (modo manual ou contribuições externas).
+
+Sem nenhuma das duas configurações, o quadro aparece, mas avisa que o Pix está em configuração.
 
 ## Painel administrativo: "Gerenciar Meta da Campanha"
 
@@ -131,7 +156,9 @@ server.js               inicialização do servidor HTTP
 src/app.js              rotas, autenticação das rotas, arquivos estáticos
 src/campaign.js         regras da campanha (modos, histórico, contribuições, Pix)
 src/pix.js              verificação e normalização do webhook Pix
-src/brcode.js           geração do Pix Copia e Cola (BR Code) do quadro de doações
+src/zuckpay.js          cliente da API ZuckPay e validação do postback assinado
+src/donations.js        doações pela ZuckPay: cobrança, consulta de status e confirmação
+src/brcode.js           Pix Copia e Cola estático (BR Code), alternativa sem processador
 src/auth.js             administradores, senhas, sessões, limite de login
 src/db.js               esquema e conexão PostgreSQL (pg em produção, PGlite local)
 public/index.html       página inicial da ONG

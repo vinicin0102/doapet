@@ -171,6 +171,15 @@ export function createApp(config) {
   async function handleApi(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
 
+    // ---------- Diagnóstico: o que está configurado (só sim/não, nunca valores) ----------
+    if (route === 'GET /api/status') {
+      return sendJson(res, 200, {
+        bancoDeDados: Boolean(config.databaseUrl),
+        pagamentosZuckPay: canCreateZuckPay,
+        armazenamentoDeMidias: Boolean(storage),
+      });
+    }
+
     // ---------- Quadro de doações ----------
     if (route === 'GET /api/doacoes/config') {
       return sendJson(res, 200, {

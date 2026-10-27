@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { MoneyError, parseBRL, parsePixAmount } from '../public/js/shared/money.js';
 import { normalizePixPayload, verifySignature } from '../src/pix.js';
 import { computeProgress, raisedForMode } from '../public/js/shared/progress.js';
+import { loadConfig } from '../src/config.js';
 
 describe('parseBRL', () => {
   it('aceita formatos brasileiros e numéricos', () => {
@@ -119,5 +120,32 @@ describe('webhook Pix', () => {
   it('trata status desconhecido como pendente', () => {
     const [e] = normalizePixPayload({ txid: 'TX2', valor: '10.00', status: 'ATIVA' });
     assert.equal(e.status, 'pendente');
+  });
+});
+
+describe('configuração do Supabase', () => {
+  it('aceita os nomes padrão', () => {
+    const c = loadConfig({ SUPABASE_URL: 'https://a.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'srv' }).supabase;
+    assert.deepEqual(c, { url: 'https://a.supabase.co', key: 'srv', bucket: 'midias' });
+  });
+
+  it('aceita os nomes com prefixo criados pela integração da Vercel', () => {
+    const c = loadConfig({
+      NEXT_PUBLIC_doapet_SUPABASE_URL: 'https://pub.supabase.co',
+      doapet_SUPABASE_URL: 'https://b.supabase.co',
+      NEXT_PUBLIC_doapet_SUPABASE_ANON_KEY: 'anon',
+      doapet_SUPABASE_ANON_KEY: 'anon',
+      doapet_SUPABASE_SERVICE_ROLE_KEY: 'srv',
+    }).supabase;
+    assert.equal(c.url, 'https://b.supabase.co');
+    assert.equal(c.key, 'srv');
+  });
+
+  it('nunca usa chave pública como chave secreta', () => {
+    const c = loadConfig({
+      doapet_SUPABASE_URL: 'https://b.supabase.co',
+      NEXT_PUBLIC_doapet_SUPABASE_SECRET_KEY: 'vazada',
+    }).supabase;
+    assert.equal(c, null);
   });
 });

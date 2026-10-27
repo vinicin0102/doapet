@@ -115,6 +115,8 @@ Detalhes:
   - `SUPABASE_URL`: em Supabase → Project Settings → API;
   - `SUPABASE_SERVICE_ROLE_KEY` (ou `SUPABASE_SECRET_KEY`): a chave secreta, que fica só no servidor;
   - `SUPABASE_BUCKET` (opcional).
+
+  Os nomes com prefixo criados pela integração Supabase da Vercel (por exemplo, `doapet_SUPABASE_URL` e `doapet_SUPABASE_SERVICE_ROLE_KEY`) também são aceitos.
 - O envio acontece em três etapas:
   1. o servidor (só para administradores) confere nome, tipo e tamanho e devolve uma URL assinada do Supabase, válida por 2 horas;
   2. o navegador envia o arquivo **direto ao Supabase**, o que evita o limite de ~4,5 MB das funções da Vercel;
@@ -122,6 +124,10 @@ Detalhes:
 - Limites:
   - imagens JPG, PNG, WEBP ou GIF até 15 MB;
   - vídeos MP4, WEBM ou MOV até 50 MB, que é o limite por arquivo do plano gratuito do Supabase.
+
+## Diagnóstico
+
+`GET /api/status` informa, só com sim/não e sem nenhum valor, se o banco de dados, os pagamentos ZuckPay e o armazenamento de mídias estão configurados.
 
 ## Painel administrativo: "Gerenciar Meta da Campanha"
 

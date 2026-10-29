@@ -1,2 +1,4 @@
 data/
 test/
+.env.local
+index.ts

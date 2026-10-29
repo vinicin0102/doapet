@@ -11,9 +11,11 @@
     "start": "node server.js",
     "dev": "SECURE_COOKIES=false node --watch server.js",
     "criar-admin": "node scripts/create-admin.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "higgsfield:exemplo": "node index.ts"
   },
   "dependencies": {
+    "@higgsfield/client": "^0.2.6",
     "pg": "^8.23.1"
   },
   "devDependencies": {

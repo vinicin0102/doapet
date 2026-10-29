@@ -125,6 +125,15 @@ Detalhes:
   - imagens JPG, PNG, WEBP ou GIF até 15 MB;
   - vídeos MP4, WEBM ou MOV até 50 MB, que é o limite por arquivo do plano gratuito do Supabase.
 
+## Geração de vídeo com a Higgsfield (Seedance 2.5)
+
+`index.ts` é um exemplo que usa o SDK oficial (`@higgsfield/client`, cliente v2) para gerar um vídeo com o modelo `bytedance/seedance-2.5/text-to-video` (5 s, 720p, 16:9) e mostrar a URL do vídeo.
+
+1. Crie uma chave no console da Higgsfield e coloque no `.env.local` (já fora do Git e da Vercel): `HF_CREDENTIALS=key-id:key-secret`.
+2. Rode `npm run higgsfield:exemplo`. **Cada execução é uma geração cobrada.**
+
+O script termina com erro, sem mostrar URL, se a geração falhar, for cancelada ou for barrada pela moderação. Ele não faz parte do site publicado.
+
 ## Diagnóstico
 
 `GET /api/status` informa, só com sim/não e sem nenhum valor, se o banco de dados, os pagamentos ZuckPay e o armazenamento de mídias estão configurados.

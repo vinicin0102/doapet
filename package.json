@@ -11,9 +11,11 @@
     "start": "node server.js",
     "dev": "SECURE_COOKIES=false node --watch server.js",
     "criar-admin": "node scripts/create-admin.js",
+    "seedance": "node scripts/seedance.js",
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
+    "@higgsfield/client": "^0.2.6",
     "pg": "^8.23.1"
   },
   "devDependencies": {
